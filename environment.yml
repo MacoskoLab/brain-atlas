@@ -1,0 +1,35 @@
+name: atlas
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - jupyterlab
+  - nodejs
+  # cloud
+  - gcsfs
+  - google-auth
+  - google-cloud-secret-manager
+  # data
+  - networkx
+  - numpy
+  - openpyxl
+  - pandas
+  - pytables
+  - scipy
+  - umap-learn
+  # dask
+  - coiled
+  - dask
+  - dask-labextension
+  - dask-ml
+  - zarr
+  # visualization
+  - bokeh
+  - datashader
+  - holoviews
+  - jupyter_bokeh
+  - jupyterlab_pyviz
+  - matplotlib
+  pip:
+    - infomap

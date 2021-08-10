@@ -15,6 +15,7 @@ dependencies:
   - numpy
   - openpyxl
   - pandas
+  - pynndescent
   - pytables
   - scipy
   - umap-learn

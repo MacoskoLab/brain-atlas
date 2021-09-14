@@ -4,12 +4,10 @@ import dask.array as da
 import numpy as np
 import scipy.stats
 
-
 log = logging.getLogger(__name__)
 
 
 # blockwise poisson fit of gene counts
-
 def dask_pblock(ds: da.Array, b: int = 20000):
     n_cells = ds.shape[0]
 
@@ -29,7 +27,7 @@ def dask_pblock(ds: da.Array, b: int = 20000):
         if i % (b * 10) == 0:
             print(i)
 
-        prob_zero = np.exp(-exp.T.dot(numis[i: i + b, :].T))  # n_genes x b
+        prob_zero = np.exp(-exp.T.dot(numis[i : i + b, :].T))  # n_genes x b
 
         exp_pct_nz_b = (1 - prob_zero).sum(1)  # n_genes
         var_pct_nz_b = (prob_zero * (1 - prob_zero)).sum(1)
@@ -45,5 +43,7 @@ def dask_pblock(ds: da.Array, b: int = 20000):
 
     exp_p = np.zeros_like(pct)
     ix = (std_pct_nz != 0).flatten()
-    exp_p[ix] = scipy.stats.norm.logcdf(pct[ix], loc=exp_pct_nz[ix], scale=std_pct_nz[ix])
+    exp_p[ix] = scipy.stats.norm.logcdf(
+        pct[ix], loc=exp_pct_nz[ix], scale=std_pct_nz[ix]
+    )
     return exp_pct_nz, pct, exp_p

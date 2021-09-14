@@ -1,24 +1,16 @@
-import gzip
 import logging
 from pathlib import Path
 
-import numpy as np
 import click
+import numpy as np
 import zarr
 from numcodecs import Blosc
-
 from tqdm.auto import tqdm
 
+from ..util import optional_gzip
 from ..util.h5 import read_10x_h5
 
 log = logging.getLogger(__name__)
-
-
-def optional_gzip(output_file: str, mode: str = "r"):
-    if output_file.endswith(".gz"):
-        return gzip.open(output_file, mode + "t")
-    else:
-        return open(output_file, mode)
 
 
 @click.command(name="make_zarr", no_args_is_help=True)
@@ -59,7 +51,7 @@ def main(
         shape=x.shape,
         chunks=(4000, 4000),
         dtype=x.dtype,
-        compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE)
+        compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
     z.set_coordinate_selection((x.row, x.col), x.data)
 
@@ -95,6 +87,8 @@ def main(
     if output_genes is not None:
         log.info(f"Writing gene list to {output_genes}")
         with optional_gzip(output_genes, "w") as out:
-            print("\n".join(f"{gene}\t{gid}" for gene, gid in zip(genes, gids)), file=out)
+            print(
+                "\n".join(f"{gene}\t{gid}" for gene, gid in zip(genes, gids)), file=out
+            )
 
     log.info("Done!")

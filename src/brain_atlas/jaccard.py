@@ -1,21 +1,15 @@
-import dask.array as da
-import numpy as np
-import numba as nb
-
 from os import PathLike
+
+import dask.array as da
+import numba as nb
+import numpy as np
 from numcodecs import Blosc
 
 
 @nb.njit(parallel=True)
 def compute_jaccard_edges(kng: np.array, min_dist=0.0625):
     n, m = kng.shape
-    dists = np.vstack(
-        (
-            np.repeat(np.arange(n), m),
-            kng.flatten(),
-            np.zeros(n * m)
-        )
-    ).T
+    dists = np.vstack((np.repeat(np.arange(n), m), kng.flatten(), np.zeros(n * m))).T
 
     for i in nb.prange(n):
         kngs = set(kng[i, :])
@@ -42,9 +36,11 @@ def write_jaccard_to_zarr(
     jaccard_edge_array: np.array,
     zarr_path: PathLike[str],
     chunk_rows: int = 100000,
-    overwrite: bool = False
+    overwrite: bool = False,
 ):
-    da.array(jaccard_edge_array[:, :2].astype(np.int32)).rechunk((chunk_rows, 2)).to_zarr(
+    da.array(jaccard_edge_array[:, :2].astype(np.int32)).rechunk(
+        (chunk_rows, 2)
+    ).to_zarr(
         zarr_path,
         "edges",
         overwrite=overwrite,

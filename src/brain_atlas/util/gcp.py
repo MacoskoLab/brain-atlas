@@ -1,4 +1,3 @@
-
 import io
 import json
 import logging
@@ -19,9 +18,7 @@ SECRET_NAME = "projects/velina-208320/secrets/sequencing-credentials/versions/la
 NUM_RETRIES = 5
 
 
-def get_secrets_manager_credentials(
-    secret_name: str = SECRET_NAME
-) -> Credentials:
+def get_secrets_manager_credentials(secret_name: str = SECRET_NAME) -> Credentials:
     client = secretmanager.SecretManagerServiceClient()
     secret_string = client.access_secret_version(name=secret_name).payload.data
 
@@ -54,4 +51,3 @@ class GoogleSheet:
     def __getitem__(self, item):
         """Returns a dataframe from a sheet in the file from its sheet name"""
         return pd.read_excel(self.sheet_io, sheet_name=item)
-

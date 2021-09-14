@@ -1,23 +1,15 @@
-import gzip
 import logging
 
-import numpy as np
 import click
-
 import dask
 import dask.array as da
+import numpy as np
 from dask.distributed import Client
-
 from numcodecs import Blosc
 
+from ..util import optional_gzip
+
 log = logging.getLogger(__name__)
-
-
-def optional_gzip(output_file: str, mode: str = "r"):
-    if output_file.endswith(".gz"):
-        return gzip.open(output_file, mode + "t")
-    else:
-        return open(output_file, mode)
 
 
 @click.command(name="filter_mt", no_args_is_help=True)
@@ -71,10 +63,10 @@ def main(
 
     log.info(f"Filtering out cells with >= {max_pct:.0%} mito reads")
     log.debug(f"Writing output to {output_zarr}")
-    with dask.config.set(**{'array.slicing.split_large_chunks': False}):
+    with dask.config.set(**{"array.slicing.split_large_chunks": False}):
         ds[m_ratio < max_pct, :].rechunk((4000, 4000)).to_zarr(
             output_zarr,
-            compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE)
+            compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
         )
 
     log.debug(f"Writing filtered cell list to {output_cells}")

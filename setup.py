@@ -51,4 +51,11 @@ setuptools.setup(
         "zarr",
     ],
     extras_require={"dev": ["black", "isort", "flake8", "pre-commit"]},
+    entry_points={
+        "console_scripts": [
+            "atlas = brain_atlas.scripts.__init__:cli",
+            "make_zarr = brain_atlas.scripts.make_zarr:main",
+            "filter_mt = brain_atlas.scripts.filter_mt:main",
+        ]
+    },
 )

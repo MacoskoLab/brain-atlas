@@ -1,24 +1,35 @@
-import dask.array as da
+import logging
 
+import dask.array as da
 import numpy as np
 import scipy.stats
+
+
+log = logging.getLogger(__name__)
+
+
 # blockwise poisson fit of gene counts
 
-
-def dask_pblock(ds: da.Array, b: int = 40000):
+def dask_pblock(ds: da.Array, b: int = 20000):
     n_cells = ds.shape[0]
 
     # pre-compute these values
+    log.debug("computing percent nonzero per gene")
     pct = ((ds > 0).sum(0) / n_cells).compute()
-    exp = (ds.sum(0, keepdims=True) / ds.sum()).persist()
-    numis = ds.sum(1, keepdims=True).persist()
+    log.debug("persisting average expression per gene")
+    exp = ds.sum(0, keepdims=True)
+    exp = (exp / exp.sum()).persist()
+    numis = ds.sum(1, keepdims=True)
 
     exp_pct_nz = np.zeros(exp.shape)  # 1 x n_genes
     var_pct_nz = np.zeros(exp.shape)  # 1 x n_genes
 
     # run in chunks (still large, but seems easier for dask to handle)
     for i in range(0, n_cells, b):
-        prob_zero = da.exp(-exp.T.dot(numis[i: i + b, :].T))  # n_genes x b
+        if i % (b * 10) == 0:
+            print(i)
+
+        prob_zero = np.exp(-exp.T.dot(numis[i: i + b, :].T))  # n_genes x b
 
         exp_pct_nz_b = (1 - prob_zero).sum(1)  # n_genes
         var_pct_nz_b = (prob_zero * (1 - prob_zero)).sum(1)

@@ -18,13 +18,14 @@ dependencies:
   - pynndescent
   - pytables
   - scipy
+  - sparse
   - umap-learn
+  - zarr
   # dask
   - coiled
   - dask
   - dask-labextension
   - dask-ml
-  - zarr
   # visualization
   - bokeh
   - datashader
@@ -32,5 +33,3 @@ dependencies:
   - jupyter_bokeh
   - jupyterlab_pyviz
   - matplotlib
-  pip:
-    - infomap

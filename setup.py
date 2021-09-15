@@ -36,12 +36,14 @@ setuptools.setup(
         "google-api-python-client",
         "google-auth",
         "google-cloud-secret-manager",
+        "leidenalg",
         "matplotlib",
         "networkx",
         "numpy",
         "openpyxl",
         "pandas",
         "pynndescent",
+        "python-igraph",
         "scikit-learn",
         "scipy",
         "sparse",
@@ -51,11 +53,5 @@ setuptools.setup(
         "zarr",
     ],
     extras_require={"dev": ["black", "isort", "flake8", "pre-commit"]},
-    entry_points={
-        "console_scripts": [
-            "atlas = brain_atlas.scripts.__init__:cli",
-            "make_zarr = brain_atlas.scripts.make_zarr:main",
-            "filter_mt = brain_atlas.scripts.filter_mt:main",
-        ]
-    },
+    entry_points={"console_scripts": ["atlas = brain_atlas.scripts.__init__:cli"]},
 )

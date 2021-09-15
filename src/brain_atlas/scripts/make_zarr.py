@@ -58,6 +58,7 @@ def main(
     for fp in tqdm(h5_files[1:]):
         i, j = z.shape
         m, mcells, mgenes, mgids = read_10x_h5(fp)
+        assert len(mcells) == len(set(mcells))
 
         gene_set.add(mgenes)
         gid_set.add(mgids)

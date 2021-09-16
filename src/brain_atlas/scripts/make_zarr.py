@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 @click.command(name="make_zarr", no_args_is_help=True)
 @click.argument("h5_files", nargs=-1, metavar="H5_FILE [H5_FILE ... ]")
-@click.argument(
+@click.option(
     "--output-zarr", required=True, type=click.Path(dir_okay=True, file_okay=False)
 )
 @click.option("--output-cells", type=click.Path())

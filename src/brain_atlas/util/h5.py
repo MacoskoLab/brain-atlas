@@ -31,4 +31,4 @@ def read_10x_h5_meta(path):
             if node.name in {"name", "id"}:
                 dsets[node.name] = node.read()
 
-        return (tuple(dsets["name"].astype(str)), tuple(dsets["id"].astype(str)))
+        return tuple(dsets["name"].astype(str)), tuple(dsets["id"].astype(str))

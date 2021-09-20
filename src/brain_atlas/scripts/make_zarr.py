@@ -28,37 +28,28 @@ def main(
     output_genes: str = None,
     min_umis: int = 500,
 ):
-    h5_files = [Path(fp) for fp in sorted(h5_files)]
+    h5_files = sorted(Path(fp) for fp in h5_files)
 
     log.info(f"reading {len(h5_files)} h5 files")
 
-    x, cells, genes, gids = read_10x_h5(h5_files[0])
-
-    log.debug(f"Read {len(genes)} genes")
-
-    log.debug(f"filtering to >= {min_umis} UMIs")
-    over_min = np.asarray(x.sum(1) >= min_umis).squeeze()
-
-    cell_lists = [[c for c, b in zip(cells, over_min) if b]]
-    gene_set = {genes}
-    gid_set = {gids}
-
-    x = x[over_min, :].tocoo()
+    cell_lists = []
+    gene_set = set()
+    gid_set = set()
 
     log.info(f"writing output to {output_zarr}")
     z = zarr.create(
         store=output_zarr,
-        shape=x.shape,
+        shape=(0, 0),
         chunks=(4000, 4000),
-        dtype=x.dtype,
+        dtype=np.int32,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
-    z.set_coordinate_selection((x.row, x.col), x.data)
 
-    for fp in tqdm(h5_files[1:]):
+    for fp in tqdm(h5_files):
         i, j = z.shape
         m, mcells, mgenes, mgids = read_10x_h5(fp)
         assert len(mcells) == len(set(mcells))
+        assert j == 0 or j == m.shape[1]
 
         gene_set.add(mgenes)
         gid_set.add(mgids)
@@ -66,7 +57,7 @@ def main(
         over_min = np.asarray(m.sum(1) >= min_umis).squeeze()
         m = m[over_min, :].tocoo()
 
-        z.resize(i + m.shape[0], j)
+        z.resize(i + m.shape[0], m.shape[1])
         z.set_coordinate_selection((m.row + i, m.col), m.data)
         cell_lists.append([c for c, b in zip(mcells, over_min) if b])
 

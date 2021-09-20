@@ -4,7 +4,6 @@ import click
 import dask
 import dask.array as da
 import numpy as np
-from dask.distributed import Client
 from numcodecs import Blosc
 
 from ..util import optional_gzip
@@ -15,7 +14,6 @@ log = logging.getLogger(__name__)
 @click.command(name="filter_mt", no_args_is_help=True)
 @click.argument("input-zarr", type=click.Path(dir_okay=True, file_okay=False))
 @click.argument("output-zarr", type=click.Path(dir_okay=True, file_okay=False))
-@click.option("-d", "--dask-client", required=True)
 @click.option("-g", "--genes", required=True, type=click.Path(exists=True))
 @click.option("-c", "--cells", required=True, type=click.Path(exists=True))
 @click.option("-o", "--output-cells", required=True, type=click.Path())
@@ -23,15 +21,11 @@ log = logging.getLogger(__name__)
 def main(
     input_zarr: str,
     output_zarr: str,
-    dask_client: str,
     genes: str,
     cells: str,
     output_cells: str = None,
     max_pct: float = 0.01,
 ):
-    client = Client(dask_client)
-    log.debug(f"connected to client {client}")
-
     log.info(f"Reading genes from {genes}")
     with optional_gzip(genes, "r") as fh:
         gene_list, gene_ids = zip(*[line.strip().split() for line in fh])

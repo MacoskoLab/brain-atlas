@@ -1,6 +1,5 @@
 import logging
 from collections import Counter
-from pathlib import Path
 
 import click
 import dask.array as da
@@ -11,7 +10,7 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
-def load_graph(n_cells: int, input_zarr: Path):
+def load_graph(n_cells: int, input_zarr: str):
     return ig.Graph(
         n=n_cells,
         edges=da.from_zarr(input_zarr, "edges").compute(),
@@ -60,9 +59,7 @@ def leiden_sweep(graph: ig.Graph, res_list: list[float], cutoff: float = None):
     help="Path to zarr holding graph edges and weights",
 )
 @click.option("-n", "--n-cells", required=True, type=int)
-@click.option(
-    "-o", "--output-dir", required=True, type=click.Path(dir_okay=True, file_okay=False)
-)
+@click.option("-o", "--output-file", required=True, type=click.Path())
 @click.option("--min-res", type=int, default=-9, help="minimum resolution 10^MIN_RES")
 @click.option(
     "--max-res", type=int, default=-5, help="maximum resolution 5 x 10^MAX_RES"
@@ -73,14 +70,14 @@ def leiden_sweep(graph: ig.Graph, res_list: list[float], cutoff: float = None):
     default=None,
     help="cluster0/cluster1 ratio cutoff to stop clustering",
 )
-def main(graph_zarr, n_cells, output_path, min_res=-9, max_res=-5, cutoff=None):
+def main(graph_zarr, n_cells, output_file, min_res=-9, max_res=-5, cutoff=None):
     graph = load_graph(n_cells, graph_zarr)
 
     res_list = [
         float(f"{b}e{p}") for p in range(min_res, max_res + 1) for b in (1, 2, 5)
     ]
 
-    output_path = Path(output_path)
     m_arrays, _ = leiden_sweep(graph, res_list, cutoff=cutoff)
-    for res in m_arrays:
-        np.save(str(output_path / f"leiden_{res}.npy"), m_arrays[res])
+
+    m_arrays = {f"{res}": arr for res, arr in m_arrays.items()}
+    np.savez_compressed(output_file, **m_arrays)

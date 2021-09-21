@@ -36,9 +36,9 @@ log = logging.getLogger(__name__)
     type=click.Path(dir_okay=True, file_okay=False),
     help="Original kNN graph for initialization",
 )
-@click.option("--min-res", type=int, default=-9, help="minimum resolution 10^MIN_RES")
+@click.option("--min-res", type=int, default=-9, help="Minimum resolution 10^MIN_RES")
 @click.option(
-    "--max-res", type=int, default=-5, help="maximum resolution 5 x 10^MAX_RES"
+    "--max-res", type=int, default=-5, help="Maximum resolution 5 x 10^MAX_RES"
 )
 @click.option(
     "--min-gene-diff",
@@ -49,8 +49,12 @@ log = logging.getLogger(__name__)
 @click.option(
     "--cutoff",
     type=float,
-    default=None,
-    help="cluster0/cluster1 ratio cutoff to stop clustering",
+    help="Stop clustering when cluster0/cluster1 is below this ratio",
+)
+@click.option(
+    "--input-key",
+    type=str,
+    help="key to use when input-clustering is an npz file",
 )
 def main(
     input_zarr: str,
@@ -64,6 +68,7 @@ def main(
     max_res: int = -5,
     min_gene_diff: float = 0.025,
     cutoff: float = None,
+    input_key: str = None,
 ):
     """
     Extracts from INPUT-ZARR for INPUT-CLUSTERING == I and subclusters the data
@@ -74,9 +79,18 @@ def main(
     output_path = Path(output_dir)
 
     clusters = np.load(input_clustering)
+    if input_clustering.endswith(".npz"):
+        if input_key is None:
+            raise click.UsageError("Must provide --input-resolution with npz file")
+        clusters = clusters[input_key]
+
+    assert clusters.shape[0] == data.shape[0], "Clusters do not match input data"
+
     ci = clusters == i
     n_cells = ci.sum()
+    assert n_cells > 0, "No cells to process"
 
+    log.info(f"Processing {n_cells} / {clusters.shape[0]} cells from {input_zarr}")
     # compute poisson and select genes
     d_i = data[ci, :]
     exp_pct_nz, pct, ds_p = dask_pblock(d_i)
@@ -86,11 +100,11 @@ def main(
     n_genes = selected_genes.shape[0]
 
     # save output
-    log.info(f"selected {n_genes} genes")
+    log.info(f"Selected {n_genes} genes")
     gene_output = output_path / f"c{i}_selected_genes.npz"
     log.debug(f"saving to {gene_output}")
     np.savez_compressed(
-        str(gene_output),
+        gene_output,
         exp_pct_nz=exp_pct_nz,
         pct=pct,
         ds_p=ds_p,

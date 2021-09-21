@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 import click
+import dask
 import dask.array as da
 import dask_ml.decomposition
 import igraph as ig
@@ -91,7 +92,8 @@ def main(
     np.save(str(gene_output), selected_genes)
 
     # subselect cells
-    d_i_mem = d_i[:, selected_genes].rechunk((2000, n_genes)).persist()
+    with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+        d_i_mem = d_i[:, selected_genes].rechunk((2000, n_genes)).persist()
 
     # (optional...?) compute PCA on subset genes
     log.info("Computing PCA")
@@ -106,7 +108,8 @@ def main(
     ipca_zarr = output_path / f"c{i}_{n_pcs}-pca.zarr"
     log.debug(f"Saving PCA to {ipca_zarr}")
     da.array(ipca).rechunk((40000, n_pcs)).to_zarr(
-        ipca_zarr, compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE)
+        str(ipca_zarr),
+        compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
 
     if knn_graph is not None:

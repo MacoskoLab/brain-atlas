@@ -46,14 +46,14 @@ def write_knn_to_zarr(
 ):
     log.debug(f"Writing neighbor graph to {zarr_path}/kng")
     da.array(kng.astype(np.int32)).rechunk((chunk_rows, kng.shape[1])).to_zarr(
-        zarr_path,
+        str(zarr_path),
         "kng",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
     log.debug(f"Writing edge distances to {zarr_path}/knd")
     da.array(knd).rechunk((chunk_rows, knd.shape[1])).to_zarr(
-        zarr_path,
+        str(zarr_path),
         "knd",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
@@ -96,14 +96,14 @@ def write_jaccard_to_zarr(
     da.array(jaccard_edge_array[:, :2].astype(np.int32)).rechunk(
         (chunk_rows, 2)
     ).to_zarr(
-        zarr_path,
+        str(zarr_path),
         "edges",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
     log.debug(f"Writing edge weights to {zarr_path}/weights")
     da.array(jaccard_edge_array[:, 2]).rechunk((chunk_rows,)).to_zarr(
-        zarr_path,
+        str(zarr_path),
         "weights",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),

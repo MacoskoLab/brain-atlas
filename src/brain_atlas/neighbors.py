@@ -14,7 +14,8 @@ def translate_kng(node_subset: np.ndarray, kng: np.ndarray):
     """
     Subset a kNN graph to only the edges between the included nodes, filling
     in the rest with random edges inside the range. Can be used to initialize
-    the creation of a new kNN for these nodes.
+    the creation of a new kNN for these nodes. Note: this adds a self-edge,
+    because NNDescent will expect it.
 
     :param node_subset: a boolean array specifying which nodes to include
     :param kng: the original k-neighbors graph to process into a new graph
@@ -24,11 +25,14 @@ def translate_kng(node_subset: np.ndarray, kng: np.ndarray):
     nz = node_subset.nonzero()[0]
     cs = (~node_subset).cumsum()
 
-    new_kng = np.random.randint(0, n_c, size=(n_c, kng.shape[1]))
+    # values of -1 will be set to random neighbors
+    new_kng = -1 * np.ones((n_c, kng.shape[1] + 1), np.int32)
+    # add self-edge
+    new_kng[:, 0] = np.arange(n_c)
 
     for ii in nb.prange(n_c):
         i = nz[ii]
-        j = 0
+        j = 1
         for k in kng[i, :]:
             if node_subset[k]:
                 new_kng[ii, j] = k - cs[k]

@@ -128,8 +128,12 @@ def main(
     # compute kNN on PCA (or on genes w/ cosine???) (save to disk)
     log.info("Computing kNN")
     kng, knd = NNDescent(
-        ipca, n_neighbors=k_neighbors, metric="euclidean", init_graph=translated_kng
+        ipca, n_neighbors=k_neighbors + 1, metric="euclidean", init_graph=translated_kng
     ).neighbor_graph
+
+    # remove self-edges
+    kng = kng[:, 1:].astype(np.int32)
+    knd = knd[:, 1:]
 
     knn_zarr = output_path / f"c{i}_{n_pcs}-pca_{k_neighbors}-knn.zarr"
     log.debug(f"Saving kNN to {knn_zarr}")
@@ -145,11 +149,7 @@ def main(
 
     # create igraph from jaccard edges
     log.info("Building graph")
-    graph = ig.Graph(
-        n=n_cells,
-        edges=dists[:, :2],
-        edge_attrs={"weight": dists[:, 2]},
-    )
+    graph = ig.Graph(n=n_cells, edges=dists[:, :2], edge_attrs={"weight": dists[:, 2]})
 
     # leiden on igraph on range of resolution values
     # find lowest non-trivial resolution (count0 / count1 < some_max_value)

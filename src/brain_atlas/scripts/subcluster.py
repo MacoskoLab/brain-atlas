@@ -87,9 +87,15 @@ def main(
 
     # save output
     log.info(f"selected {n_genes} genes")
-    gene_output = output_path / f"c{i}_selected_genes.npy"
+    gene_output = output_path / f"c{i}_selected_genes.npz"
     log.debug(f"saving to {gene_output}")
-    np.save(str(gene_output), selected_genes)
+    np.savez_compressed(
+        str(gene_output),
+        exp_pct_nz=exp_pct_nz,
+        pct=pct,
+        ds_p=ds_p,
+        selected_genes=selected_genes,
+    )
 
     # subselect cells
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):

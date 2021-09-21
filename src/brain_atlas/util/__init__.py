@@ -18,6 +18,8 @@ def create_logger(debug: bool = False):
     logging.getLogger("googleapiclient").setLevel(logging.WARNING)
     # matplotlib has a lot of debug output we don't need
     logging.getLogger("matplotlib").setLevel(logging.INFO)
+    # numba logging is off the charts
+    logging.getLogger("numba").setLevel(logging.WARNING)
 
     if debug:
         root_log.setLevel(logging.DEBUG)

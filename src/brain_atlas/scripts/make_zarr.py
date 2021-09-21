@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 @click.option("--output-genes", type=click.Path())
 @click.option("--min-umis", type=int, default=500)
 def main(
-    h5_files: list[str],
+    *h5_files: str,
     output_zarr: str,
     output_cells: str = None,
     output_genes: str = None,

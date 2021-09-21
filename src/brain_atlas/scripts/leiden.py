@@ -53,11 +53,7 @@ def leiden_sweep(graph: ig.Graph, res_list: list[float], cutoff: float = None):
 
 
 @click.command("leiden-sweep")
-@click.argument(
-    "graph-zarr",
-    type=click.Path(dir_okay=True, file_okay=False),
-    help="Path to zarr holding graph edges and weights",
-)
+@click.argument("graph-zarr", type=click.Path(dir_okay=True, file_okay=False))
 @click.option("-n", "--n-cells", required=True, type=int)
 @click.option("-o", "--output-file", required=True, type=click.Path())
 @click.option("--min-res", type=int, default=-9, help="minimum resolution 10^MIN_RES")

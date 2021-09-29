@@ -56,6 +56,7 @@ log = logging.getLogger(__name__)
     type=str,
     help="key to use when input-clustering is an npz file",
 )
+@click.option("--overwrite", is_flag=True)
 def main(
     input_zarr: str,
     input_clustering: str,
@@ -69,6 +70,7 @@ def main(
     min_gene_diff: float = 0.025,
     cutoff: float = None,
     input_key: str = None,
+    overwrite: bool = False,
 ):
     """
     Extracts from INPUT-ZARR for INPUT-CLUSTERING == I and subclusters the data
@@ -81,7 +83,7 @@ def main(
     clusters = np.load(input_clustering)
     if input_clustering.endswith(".npz"):
         if input_key is None:
-            raise click.UsageError("Must provide --input-resolution with npz file")
+            raise click.UsageError("Must provide --input-key with npz file")
         clusters = clusters[input_key]
 
     assert clusters.shape[0] == data.shape[0], "Clusters do not match input data"
@@ -113,7 +115,7 @@ def main(
 
     # subselect cells
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-        d_i_mem = d_i[:, selected_genes].rechunk((2000, n_genes)).persist()
+        d_i_mem = d_i[:, selected_genes].rechunk((2000, n_genes))
 
     # (optional...?) compute PCA on subset genes
     log.info("Computing PCA")
@@ -130,14 +132,23 @@ def main(
     da.array(ipca).rechunk((40000, n_pcs)).to_zarr(
         str(ipca_zarr),
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
+        overwrite=overwrite,
     )
 
+    translated_kng = None
     if knn_graph is not None:
         log.debug(f"loading existing kNN graph from {knn_graph}")
-        original_kng = da.from_zarr(knn_graph, "kng").compute()
-        translated_kng = neighbors.translate_kng(ci, original_kng)
-    else:
-        translated_kng = None
+        original_kng = da.from_zarr(knn_graph, "kng")
+        if original_kng.shape[0] == ci.shape[0]:
+            translated_kng = neighbors.translate_kng(ci, original_kng.compute())
+        elif original_kng.shape[0] == (clusters > -1).sum():
+            translated_kng = neighbors.translate_kng(
+                ci[clusters > -1], original_kng.compute()
+            )
+        else:
+            log.warning(
+                f"kNN shape {original_kng.shape} did not match clusters {ci.shape}"
+            )
 
     # compute kNN on PCA (or on genes w/ cosine???) (save to disk)
     log.info("Computing kNN")
@@ -151,7 +162,7 @@ def main(
 
     knn_zarr = output_path / f"c{i}_{n_pcs}-pca_{k_neighbors}-knn.zarr"
     log.debug(f"Saving kNN to {knn_zarr}")
-    neighbors.write_knn_to_zarr(kng, knd, knn_zarr)
+    neighbors.write_knn_to_zarr(kng, knd, knn_zarr, overwrite=overwrite)
 
     # compute jaccard on kNN (save to disk)
     log.info("Computing SNN")
@@ -159,7 +170,7 @@ def main(
 
     snn_zarr = output_path / f"c{i}_{n_pcs}-pca_{k_neighbors}-snn.zarr"
     log.debug(f"Saving SNN to {snn_zarr}")
-    neighbors.write_jaccard_to_zarr(dists, snn_zarr)
+    neighbors.write_jaccard_to_zarr(dists, snn_zarr, overwrite=overwrite)
 
     # create igraph from jaccard edges
     log.info("Building graph")

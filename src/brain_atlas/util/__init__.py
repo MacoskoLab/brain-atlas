@@ -12,8 +12,11 @@ def optional_gzip(output_file: str, mode: str = "r"):
 
 
 def create_logger(debug: bool = False):
+    # TODO: log to a file
     root_log = logging.getLogger()
 
+    # don't need debug output for asyncio
+    logging.getLogger("asyncio").setLevel(logging.INFO)
     # google is noisy, turn up its logging level
     logging.getLogger("googleapiclient").setLevel(logging.WARNING)
     # matplotlib has a lot of debug output we don't need

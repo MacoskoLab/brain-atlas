@@ -1,5 +1,6 @@
 import gzip
 import logging
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -11,8 +12,7 @@ def optional_gzip(output_file: str, mode: str = "r"):
         return open(output_file, mode)
 
 
-def create_logger(debug: bool = False):
-    # TODO: log to a file
+def create_logger(debug: bool = False, log_file: Path = None):
     root_log = logging.getLogger()
 
     # don't need debug output for asyncio
@@ -38,3 +38,10 @@ def create_logger(debug: bool = False):
 
     root_log.addHandler(stream_handler)
     log.debug(msg="Added stream handler")
+
+    if log_file is not None:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        root_log.addHandler(file_handler)
+        log.debug(msg="Added file handler")

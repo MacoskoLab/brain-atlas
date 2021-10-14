@@ -37,7 +37,11 @@ def leiden_sweep(graph: ig.Graph, res_list: list[float], cutoff: float = None):
 
         membership_arrays[res] = np.array(membership)
         membership_counts[res] = Counter(membership_arrays[res])
-        c0c1_ratio = membership_counts[res][0] / membership_counts[res][1]
+        if membership_counts[res][1] > 0:
+            c0c1_ratio = membership_counts[res][0] / membership_counts[res][1]
+        else:
+            continue
+
         if cutoff is not None and c0c1_ratio < cutoff:
             log.info(
                 f"Reached nontrivial clustering with c0/c1 ratio {c0c1_ratio:.1f}, stopping"

@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 
 # blockwise poisson fit of gene counts
-def dask_pblock(ds: da.Array, b: int = 128000):
+def dask_pblock(ds: da.Array, numis: da.Array = None, b: int = 128000):
     n_cells = ds.shape[0]
 
     # pre-compute these values
@@ -17,7 +17,8 @@ def dask_pblock(ds: da.Array, b: int = 128000):
     log.debug("persisting average expression per gene")
     exp = ds.sum(0, keepdims=True)
     exp = (exp / exp.sum()).persist()
-    numis = ds.sum(1, keepdims=True)
+    if numis is None:
+        numis = ds.sum(1, keepdims=True)
 
     exp_pct_nz = np.zeros(exp.shape)  # 1 x n_genes
     var_pct_nz = np.zeros(exp.shape)  # 1 x n_genes

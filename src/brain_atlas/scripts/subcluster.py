@@ -13,6 +13,7 @@ from pynndescent import NNDescent
 import brain_atlas.neighbors as neighbors
 from brain_atlas.gene_selection import dask_pblock
 from brain_atlas.scripts.leiden import leiden_sweep
+from brain_atlas.util.dataset import Dataset
 
 log = logging.getLogger(__name__)
 
@@ -70,14 +71,14 @@ def main(
     min_gene_diff: float = 0.025,
     cutoff: float = None,
     input_key: str = None,
-    overwrite: bool = False,
+    overwrite: bool = False,  # TODO: caching if False
 ):
     """
     Extracts from INPUT-ZARR for INPUT-CLUSTERING == I and subclusters the data
     using a leiden sweep across the specified resolutions, stopping at the optional cutoff.
     """
 
-    data = da.from_zarr(input_zarr)
+    ds = Dataset(input_zarr)
     output_path = Path(output_dir)
 
     clusters = np.load(input_clustering)
@@ -86,7 +87,7 @@ def main(
             raise click.UsageError("Must provide --input-key with npz file")
         clusters = clusters[input_key]
 
-    assert clusters.shape[0] == data.shape[0], "Clusters do not match input data"
+    assert clusters.shape[0] == ds.counts.shape[0], "Clusters do not match input data"
 
     ci = clusters == i
     n_cells = ci.sum()
@@ -94,8 +95,8 @@ def main(
 
     log.info(f"Processing {n_cells} / {clusters.shape[0]} cells from {input_zarr}")
     # compute poisson and select genes
-    d_i = data[ci, :]
-    exp_pct_nz, pct, ds_p = dask_pblock(d_i)
+    d_i = ds.counts[ci, :]
+    exp_pct_nz, pct, ds_p = dask_pblock(d_i, numis=ds.numis[ci, :])
 
     gene_cutoff = max(min_gene_diff, np.percentile(exp_pct_nz - pct, 90))
     selected_genes = (exp_pct_nz - pct > gene_cutoff).nonzero()[0]

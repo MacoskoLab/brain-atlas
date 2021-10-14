@@ -2,11 +2,10 @@ import logging
 
 import click
 import dask
-import dask.array as da
 import numpy as np
-from numcodecs import Blosc
 
-from ..util import optional_gzip
+from brain_atlas.util import optional_gzip
+from brain_atlas.util.dataset import Dataset
 
 log = logging.getLogger(__name__)
 
@@ -42,13 +41,12 @@ def main(
     log.debug(f"Read {len(input_cells)} cells from {cells}")
 
     log.debug(f"Reading from {input_zarr}")
-    ds = da.from_zarr(input_zarr)
+    ds = Dataset(input_zarr)
 
-    numis = ds.sum(1)
-    mdist = ds[:, mito_idx].sum(1)
+    mdist = ds.counts[:, mito_idx].sum(1)
 
     log.info("Computing mitochondrial ratio")
-    m_ratio = (mdist / numis).compute()
+    m_ratio = (mdist / ds.numis).compute()
 
     log.info(
         "Mitochondrial distribution:\n"
@@ -56,12 +54,11 @@ def main(
     )
 
     log.info(f"Filtering out cells with >= {max_pct:.0%} mito reads")
+    ix = m_ratio < max_pct
+
     log.debug(f"Writing output to {output_zarr}")
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-        ds[m_ratio < max_pct, :].rechunk((4000, 4000)).to_zarr(
-            output_zarr,
-            compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
-        )
+        Dataset.save(output_zarr, ds.counts[ix, :], ds.numis[ix, :])
 
     log.debug(f"Writing filtered cell list to {output_cells}")
     with optional_gzip(output_cells, "w") as out:

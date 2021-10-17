@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
     default=5.0,
     help="Stop clustering when cluster0/cluster1 is below this ratio",
 )
-@click.option("--input-key", type=str, help="Resolution to use from parent clustering")
+@click.option("--resolution", type=str, help="Resolution to use from parent clustering")
 @click.option("--overwrite", is_flag=True, help="Don't use any cached results")
 def main(
     root_path: str,

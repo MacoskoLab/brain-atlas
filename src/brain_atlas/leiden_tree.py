@@ -38,12 +38,7 @@ class LeidenTree:
         with yaml_path.open() as fh:
             metadata = yaml.safe_load(fh)
 
-        return {
-            "data": Path(metadata["data"]),
-            "n_pcs": metadata["n_pcs"],
-            "k_neighbors": metadata["k_neighbors"],
-            "resolution": metadata["resolution"],
-        }
+        return {**metadata, "data": Path(metadata["data"])}
 
     @staticmethod
     def from_path(root_path: Path):

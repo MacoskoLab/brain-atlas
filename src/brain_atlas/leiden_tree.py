@@ -22,8 +22,8 @@ class LeidenTree:
         self.root = root
         self.root.mkdir(exist_ok=True)
 
+        assert data.exists(), f"{data} does not exist"
         self.data = data
-        assert self.data.exists(), f"{data} does not exist"
 
         assert n_pcs > 0
         self.n_pcs = n_pcs
@@ -34,48 +34,53 @@ class LeidenTree:
         self.resolution = resolution
 
     @staticmethod
+    def read_yaml(yaml_path: Path):
+        with yaml_path.open() as fh:
+            metadata = yaml.safe_load(fh)
+
+        return {
+            "data": Path(metadata["data"]),
+            "n_pcs": metadata["n_pcs"],
+            "k_neighbors": metadata["k_neighbors"],
+            "resolution": metadata["resolution"],
+        }
+
+    @staticmethod
     def from_path(root_path: Path):
         metadata_path = root_path / "metadata.yaml"
         assert metadata_path.exists(), f"{metadata_path} does not exist"
 
-        with metadata_path.open() as fh:
-            metadata = yaml.safe_load(fh)
+        metadata = LeidenTree.read_yaml(metadata_path)
 
-        return LeidenTree(
-            root=root_path,
-            data=Path(metadata["data"]),
-            n_pcs=metadata["n_pcs"],
-            k_neighbors=metadata["k_neighbors"],
-            resolution=metadata["resolution"],
-        )
+        return LeidenTree(root=root_path, **metadata)
 
     def write_metadata(self):
-        metadata = {
+        with self.metadata_yaml.open("w") as out:
+            # convert Path to string before writing
+            yaml.safe_dump({**self.metadata, "data": str(self.data)}, stream=out)
+
+    def is_valid_cache(self):
+        if not self.metadata_yaml.exists():
+            return False
+
+        metadata = LeidenTree.read_yaml(self.metadata_yaml)
+
+        return self.metadata == metadata
+
+    def subcluster_path(self, level: Sequence[int]):
+        return self.root.joinpath(*map(str, level))
+
+    @property
+    def metadata(self):
+        return {
             "data": self.data,
             "n_pcs": self.n_pcs,
             "k_neighbors": self.k_neighbors,
             "resolution": self.resolution,
         }
 
-        with self.metadata.open("w") as out:
-            yaml.safe_dump(metadata, stream=out)
-
-    def is_valid_cache(self):
-        if not self.metadata.exists():
-            return False
-
-        with self.metadata.open() as fh:
-            metadata = yaml.safe_load(fh)
-
-        return (
-            self.data == Path(metadata["data"])
-            and self.n_pcs == metadata["n_pcs"]
-            and self.k_neighbors == metadata["k_neighbors"]
-            and self.resolution == metadata["resolution"]
-        )
-
     @property
-    def metadata(self):
+    def metadata_yaml(self):
         return self.root / "metadata.yaml"
 
     @property
@@ -97,9 +102,6 @@ class LeidenTree:
     @property
     def clustering(self):
         return self.root / "clusters.npz"
-
-    def subcluster_path(self, level: Sequence[int]):
-        return self.root.joinpath(*map(str, level))
 
     def __str__(self):
         return str(self.root)

@@ -59,7 +59,7 @@ def main(
     """
 
     root = LeidenTree.from_path(Path(root_path))
-    ds = Dataset(root.data)
+    ds = Dataset(str(root.data))
 
     # open the tree one level up (this might be the root)
     parent = LeidenTree.from_path(root.subcluster_path(level[:-1]))
@@ -120,7 +120,7 @@ def main(
     # (optional...?) compute PCA on subset genes
     if valid_cache and tree.pca.exists():
         log.info(f"Loading cached PCA from {tree.pca}")
-        ipca = da.from_zarr(tree.pca).compute()
+        ipca = da.from_zarr(str(tree.pca)).compute()
     else:
         log.info("Computing PCA")
         ipca = (
@@ -140,12 +140,12 @@ def main(
 
     if valid_cache and tree.knn.exists():
         log.info(f"Loading cached kNN from {tree.knn}")
-        kng = da.from_zarr(tree.knn, "kng")
+        kng = da.from_zarr(str(tree.knn), "kng")
     else:
         translated_kng = None
         if parent.knn.exists():
             log.debug(f"loading existing kNN graph from {parent.knn}")
-            original_kng = da.from_zarr(parent.knn, "kng")
+            original_kng = da.from_zarr(str(parent.knn), "kng")
             if original_kng.shape[0] == ci.shape[0]:
                 translated_kng = neighbors.translate_kng(ci, original_kng.compute())
             elif original_kng.shape[0] == (clusters > -1).sum():
@@ -176,8 +176,8 @@ def main(
     if valid_cache and tree.snn.exists():
         log.info(f"Loading cached SNN from {tree.snn}")
 
-        edges = da.from_zarr(tree.snn, "edges").compute()
-        weights = da.from_zarr(tree.snn, "weights").compute()
+        edges = da.from_zarr(str(tree.snn), "edges").compute()
+        weights = da.from_zarr(str(tree.snn), "weights").compute()
     else:
         # compute jaccard on kNN (save to disk)
         log.info("Computing SNN")

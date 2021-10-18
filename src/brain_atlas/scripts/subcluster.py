@@ -68,6 +68,7 @@ def main(
         # use the largest resolution present in the file
         resolution = max(clusters, key=float)
 
+    log.debug(f"Using parent clustering with resolution {resolution}")
     clusters: np.ndarray = clusters[resolution]
     assert clusters.shape[0] == ds.counts.shape[0], "Clusters do not match input data"
 
@@ -78,6 +79,7 @@ def main(
         k_neighbors=k_neighbors or root.k_neighbors,
         resolution=resolution,
     )
+    log.debug(f"Saving results to {tree}")
 
     valid_cache = (not overwrite) and tree.is_valid_cache()
     if not valid_cache:
@@ -87,8 +89,7 @@ def main(
     n_cells = ci.sum()
     assert n_cells > 0, "No cells to process"
 
-    log.info(f"Processing {n_cells} / {clusters.shape[0]} cells from {tree}")
-    # compute poisson and select genes
+    log.info(f"Processing {n_cells} / {clusters.shape[0]} cells from {tree.data}")
     d_i = ds.counts[ci, :]
 
     if valid_cache and tree.selected_genes.exists():
@@ -113,7 +114,7 @@ def main(
             selected_genes=selected_genes,
         )
 
-    # subselect cells
+    # subselect genes
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
         d_i_mem = d_i[:, selected_genes].rechunk((2000, n_genes))
 

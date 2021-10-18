@@ -203,7 +203,7 @@ def main(
 
     if valid_cache and tree.clustering.exists():
         with np.load(tree.clustering) as data:
-            cached_arrays = dict(data)
+            cached_arrays = {float(k): data[k] for k in data}
     else:
         cached_arrays = None
 

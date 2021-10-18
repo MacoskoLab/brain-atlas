@@ -41,6 +41,7 @@ log = logging.getLogger(__name__)
 )
 @click.option("--resolution", type=str, help="Resolution to use from parent clustering")
 @click.option("--overwrite", is_flag=True, help="Don't use any cached results")
+@click.option("--high-res", is_flag=True, help="Use a more granular resolution sweep")
 def main(
     root_path: str,
     level: Sequence[int],
@@ -52,6 +53,7 @@ def main(
     cutoff: float = 5.0,
     resolution: str = None,
     overwrite: bool = False,
+    high_res: bool = False,
 ):
     """
     Subclusters LEVEL of the ROOT_PATH Leiden tree, performing a sweep across
@@ -194,13 +196,21 @@ def main(
     log.info("Building graph")
     graph = ig.Graph(n=n_cells, edges=edges, edge_attrs={"weight": weights})
 
+    if high_res:
+        bs = range(1, 10)
+    else:
+        bs = (1, 2, 5)
+
+    if valid_cache and tree.clustering.exists():
+        with np.load(tree.clustering) as data:
+            cached_arrays = dict(data)
+    else:
+        cached_arrays = None
+
     # leiden on igraph on range of resolution values
     # find lowest non-trivial resolution (count0 / count1 < some_max_value)
-    res_list = [
-        float(f"{b}e{p}") for p in range(min_res, max_res + 1) for b in (1, 2, 5)
-    ]
-
-    res_arrays, _ = leiden_sweep(graph, res_list, cutoff)
+    res_list = [float(f"{b}e{p}") for p in range(min_res, max_res + 1) for b in bs]
+    res_arrays, _ = leiden_sweep(graph, res_list, cutoff, cached_arrays=cached_arrays)
 
     clusterings = {}
     for res in sorted(res_arrays):

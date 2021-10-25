@@ -18,25 +18,39 @@ def load_graph(n_cells: int, input_zarr: str):
     )
 
 
-def leiden_sweep(graph: ig.Graph, res_list: list[float], cutoff: float = None):
+def leiden_sweep(
+    graph: ig.Graph,
+    res_list: list[float],
+    cutoff: float = None,
+    cached_arrays: dict[float, np.ndarray] = None,
+):
     membership = None
     opt = la.Optimiser()
+
     membership_arrays = {}
     membership_counts = {}
+    if cached_arrays is not None:
+        log.debug(f"Got {len(cached_arrays)} cached membership arrays")
+        membership_arrays.update(cached_arrays)
+        membership_counts.update((k, Counter(v)) for k, v in cached_arrays.items())
 
     for res in res_list:
         log.info(f"Leiden clustering at resolution: {res}")
-        partition = la.CPMVertexPartition(
-            graph,
-            initial_membership=membership,
-            weights="weight",
-            resolution_parameter=res,
-        )
-        opt.optimise_partition(partition)
-        membership = partition.membership
+        if res in membership_arrays:
+            membership = membership_arrays[res]
+        else:
+            partition = la.CPMVertexPartition(
+                graph,
+                initial_membership=membership,
+                weights="weight",
+                resolution_parameter=res,
+            )
+            opt.optimise_partition(partition)
+            membership = partition.membership
 
-        membership_arrays[res] = np.array(membership)
-        membership_counts[res] = Counter(membership_arrays[res])
+            membership_arrays[res] = np.array(membership)
+            membership_counts[res] = Counter(membership_arrays[res])
+
         if membership_counts[res][1] > 0:
             c0c1_ratio = membership_counts[res][0] / membership_counts[res][1]
         else:

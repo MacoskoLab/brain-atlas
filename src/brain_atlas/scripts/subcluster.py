@@ -116,6 +116,10 @@ def main(
             selected_genes=selected_genes,
         )
 
+    if tree.n_pcs > n_genes:
+        log.error(f"Can't compute {tree.n_pcs} PCs for {n_genes} genes")
+        return
+
     # subselect genes
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
         d_i_mem = d_i[:, selected_genes].rechunk((2000, n_genes))

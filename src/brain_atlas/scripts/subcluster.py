@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 @click.option("-k", "--k-neighbors", type=int)
 @click.option(
     "-t",
-    "--tranform",
+    "--transform",
     type=click.Choice(["none", "sqrt", "log1p"], case_sensitive=False),
 )
 @click.option("--min-res", type=int, default=-9, help="Minimum resolution 10^MIN_RES")

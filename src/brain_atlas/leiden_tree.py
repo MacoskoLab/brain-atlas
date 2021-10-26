@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Sequence
 
+import dask.array as da
 import yaml
 
 
@@ -23,6 +24,7 @@ class LeidenTree:
         data: Path,
         n_pcs: int,
         k_neighbors: int,
+        transform: str = None,
         resolution: str = None,
     ):
         self.dir = tree_dir
@@ -31,11 +33,18 @@ class LeidenTree:
         assert data.exists(), f"{data} does not exist"
         self.data = data
 
-        assert n_pcs > 0
+        assert n_pcs is None or n_pcs > 0
         self.n_pcs = n_pcs
 
         assert k_neighbors > 0
         self.k_neighbors = k_neighbors
+
+        if transform is None or transform.lower() == "none":
+            self.transform = None
+        elif transform.lower() in ("sqrt", "log1p"):
+            self.transform = transform.lower()
+        else:
+            raise ValueError(f"Unknown transform {transform}")
 
         self.resolution = resolution
 
@@ -72,11 +81,23 @@ class LeidenTree:
         return self.dir.joinpath(*map(str, level))
 
     @property
+    def transform_fn(self):
+        if self.transform is None:
+            return lambda x: x
+        elif self.transform == "sqrt":
+            return da.sqrt
+        elif self.transform == "log1p":
+            return da.log1p
+        else:
+            raise ValueError(f"Unknown transform {self.transform}")
+
+    @property
     def metadata(self):
         return {
             "data": self.data,
             "n_pcs": self.n_pcs,
             "k_neighbors": self.k_neighbors,
+            "transform": self.transform,
             "resolution": self.resolution,
         }
 

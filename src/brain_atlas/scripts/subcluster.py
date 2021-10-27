@@ -67,8 +67,11 @@ def main(
     parent = LeidenTree.from_path(root.subcluster_path(level[:-1]))
     clusters = np.load(parent.clustering)
     if resolution is None:
-        # use the largest resolution present in the file
-        resolution = max(clusters, key=float)
+        if parent.resolution is None:
+            # use the largest resolution present in the file
+            resolution = max(clusters, key=float)
+        else:
+            resolution = parent.resolution
 
     log.debug(f"Using parent clustering with resolution {resolution}")
     clusters: np.ndarray = clusters[resolution]
@@ -79,7 +82,6 @@ def main(
         data=root.data,
         n_pcs=n_pcs or root.n_pcs,
         k_neighbors=k_neighbors or root.k_neighbors,
-        resolution=resolution,
     )
     log.debug(f"Saving results to {tree}")
 
@@ -226,5 +228,9 @@ def main(
 
     log.debug(f"Saving clustering output to {tree.clustering}")
     np.savez_compressed(tree.clustering, **clusterings)
+
+    log.info(f"Writing new metadata with resolution {res}")
+    tree.resolution = f"{res}"
+    tree.write_metadata()
 
     log.info("Done!")

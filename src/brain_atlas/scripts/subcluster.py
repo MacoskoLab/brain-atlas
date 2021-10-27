@@ -245,8 +245,8 @@ def main(
     log.debug(f"Saving clustering output to {tree.clustering}")
     np.savez_compressed(tree.clustering, **clusterings)
 
-    log.info(f"Writing new metadata with resolution {res}")
-    tree.resolution = f"{res}"
+    tree.resolution = max(clusterings, key=float)
+    log.info(f"Writing new metadata with resolution {tree.resolution}")
     tree.write_metadata()
 
     log.info("Done!")

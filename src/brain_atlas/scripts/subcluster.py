@@ -130,8 +130,8 @@ def main(
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
         d_i_mem = tree.transform_fn(d_i[:, selected_genes].rechunk((2000, n_genes)))
 
-    # optional: compute PCA on subset genes
     if tree.n_pcs is not None:
+        # compute PCA on subset genes
         if tree.n_pcs > n_genes:
             log.error(f"Can't compute {tree.n_pcs} PCs for {n_genes} genes")
             return
@@ -156,6 +156,13 @@ def main(
                 overwrite=overwrite,
             )
 
+        knn_data = ipca
+        knn_metric = "euclidean"
+    else:
+        # NNDescent will convert this to a numpy array
+        knn_data = d_i_mem
+        knn_metric = "cosine"
+
     if valid_cache and tree.knn.exists():
         log.info(f"Loading cached kNN from {tree.knn}")
         kng = da.from_zarr(str(tree.knn), "kng")
@@ -175,22 +182,14 @@ def main(
                     f"kNN shape {original_kng.shape} did not match clusters {ci.shape}"
                 )
 
-        # compute kNN on PCA (or on genes w/ cosine???) (save to disk)
+        # compute kNN, either on PCA or on counts
         log.info("Computing kNN")
-        if tree.n_pcs:
-            kng, knd = NNDescent(
-                ipca,
-                n_neighbors=tree.k_neighbors + 1,
-                metric="euclidean",
-                init_graph=translated_kng,
-            ).neighbor_graph
-        else:
-            kng, knd = NNDescent(
-                d_i_mem,
-                n_neighbors=tree.k_neighbors + 1,
-                metric="cosine",
-                init_graph=translated_kng,
-            ).neighbor_graph
+        kng, knd = NNDescent(
+            data=knn_data,
+            n_neighbors=tree.k_neighbors + 1,
+            metric=knn_metric,
+            init_graph=translated_kng,
+        ).neighbor_graph
 
         # remove self-edges
         kng = kng[:, 1:].astype(np.int32)
@@ -205,7 +204,7 @@ def main(
         edges = da.from_zarr(str(tree.snn), "edges").compute()
         weights = da.from_zarr(str(tree.snn), "weights").compute()
     else:
-        # compute jaccard on kNN (save to disk)
+        # compute jaccard on kNN
         log.info("Computing SNN")
         dists = neighbors.compute_jaccard_edges(kng)
 

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 import dask.array as da
 import yaml
@@ -23,7 +23,7 @@ class LeidenTree:
         self,
         tree_dir: Path,
         data: Path,
-        n_pcs: int,
+        n_pcs: Optional[int],
         k_neighbors: int,
         transform: str = None,
         resolution: str = None,

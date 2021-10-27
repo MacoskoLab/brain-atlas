@@ -15,6 +15,7 @@ class LeidenTree:
     :param data: Location of the raw data (should be a zarr array)
     :param n_pcs: number of PCs to use, if computing PCA
     :param k_neighbors: number of neighbors for kNN
+    :param transform: transform for scaling counts (sqrt, log1p, or none)
     :param resolution: the Leiden resolution used to define the clusters
     """
 

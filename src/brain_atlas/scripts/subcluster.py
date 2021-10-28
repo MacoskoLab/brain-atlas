@@ -23,8 +23,13 @@ log = logging.getLogger(__name__)
 @click.command("subcluster")
 @click.argument("root_path", type=click.Path(dir_okay=True, file_okay=False))
 @click.argument("level", type=int, nargs=-1)
-@click.option("-n", "--n-pcs", type=int)
+@click.option("-n", "--n-pcs", type=int, help="Number of PCs to compute, if any")
 @click.option("-k", "--k-neighbors", type=int)
+@click.option(
+    "-t",
+    "--transform",
+    type=click.Choice(["none", "sqrt", "log1p"], case_sensitive=False),
+)
 @click.option("--min-res", type=int, default=-9, help="Minimum resolution 10^MIN_RES")
 @click.option("--max-res", type=int, default=-1, help="Maximum resolution 5x10^MAX_RES")
 @click.option(
@@ -47,6 +52,7 @@ def main(
     level: Sequence[int],
     n_pcs: int = None,
     k_neighbors: int = None,
+    transform: str = None,
     min_res: int = -9,
     max_res: int = -1,
     min_gene_diff: float = 0.025,
@@ -67,8 +73,11 @@ def main(
     parent = LeidenTree.from_path(root.subcluster_path(level[:-1]))
     clusters = np.load(parent.clustering)
     if resolution is None:
-        # use the largest resolution present in the file
-        resolution = max(clusters, key=float)
+        if parent.resolution is None:
+            # use the largest resolution present in the file
+            resolution = max(clusters, key=float)
+        else:
+            resolution = parent.resolution
 
     log.debug(f"Using parent clustering with resolution {resolution}")
     clusters: np.ndarray = clusters[resolution]
@@ -79,6 +88,7 @@ def main(
         data=root.data,
         n_pcs=n_pcs or root.n_pcs,
         k_neighbors=k_neighbors or root.k_neighbors,
+        transform=transform or root.transform,
         resolution=resolution,
     )
     log.debug(f"Saving results to {tree}")
@@ -116,34 +126,42 @@ def main(
             selected_genes=selected_genes,
         )
 
-    if tree.n_pcs > n_genes:
-        log.error(f"Can't compute {tree.n_pcs} PCs for {n_genes} genes")
-        return
-
     # subselect genes
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-        d_i_mem = d_i[:, selected_genes].rechunk((2000, n_genes))
+        d_i_mem = tree.transform_fn(d_i[:, selected_genes].rechunk((2000, n_genes)))
 
-    # (optional...?) compute PCA on subset genes
-    if valid_cache and tree.pca.exists():
-        log.info(f"Loading cached PCA from {tree.pca}")
-        ipca = da.from_zarr(str(tree.pca)).compute()
-    else:
-        log.info("Computing PCA")
-        ipca = (
-            dask_ml.decomposition.incremental_pca.IncrementalPCA(
-                n_components=tree.n_pcs, batch_size=40000
+    if tree.n_pcs is not None:
+        # compute PCA on subset genes
+        if tree.n_pcs > n_genes:
+            log.error(f"Can't compute {tree.n_pcs} PCs for {n_genes} genes")
+            return
+
+        if valid_cache and tree.pca.exists():
+            log.info(f"Loading cached PCA from {tree.pca}")
+            ipca = da.from_zarr(str(tree.pca)).compute()
+        else:
+            log.info("Computing PCA")
+            ipca = (
+                dask_ml.decomposition.incremental_pca.IncrementalPCA(
+                    n_components=tree.n_pcs, batch_size=40000
+                )
+                .fit_transform(d_i_mem)
+                .compute()
             )
-            .fit_transform(d_i_mem)
-            .compute()
-        )
 
-        log.debug(f"Saving PCA to {tree.pca}")
-        da.array(ipca).rechunk((40000, n_pcs)).to_zarr(
-            str(tree.pca),
-            compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
-            overwrite=overwrite,
-        )
+            log.debug(f"Saving PCA to {tree.pca}")
+            da.array(ipca).rechunk((40000, n_pcs)).to_zarr(
+                str(tree.pca),
+                compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
+                overwrite=overwrite,
+            )
+
+        knn_data = ipca
+        knn_metric = "euclidean"
+    else:
+        # NNDescent will convert this to a numpy array
+        knn_data = d_i_mem
+        knn_metric = "cosine"
 
     if valid_cache and tree.knn.exists():
         log.info(f"Loading cached kNN from {tree.knn}")
@@ -164,12 +182,12 @@ def main(
                     f"kNN shape {original_kng.shape} did not match clusters {ci.shape}"
                 )
 
-        # compute kNN on PCA (or on genes w/ cosine???) (save to disk)
+        # compute kNN, either on PCA or on counts
         log.info("Computing kNN")
         kng, knd = NNDescent(
-            ipca,
+            data=knn_data,
             n_neighbors=tree.k_neighbors + 1,
-            metric="euclidean",
+            metric=knn_metric,
             init_graph=translated_kng,
         ).neighbor_graph
 
@@ -186,7 +204,7 @@ def main(
         edges = da.from_zarr(str(tree.snn), "edges").compute()
         weights = da.from_zarr(str(tree.snn), "weights").compute()
     else:
-        # compute jaccard on kNN (save to disk)
+        # compute jaccard on kNN
         log.info("Computing SNN")
         dists = neighbors.compute_jaccard_edges(kng)
 
@@ -226,5 +244,9 @@ def main(
 
     log.debug(f"Saving clustering output to {tree.clustering}")
     np.savez_compressed(tree.clustering, **clusterings)
+
+    tree.resolution = max(clusterings, key=float)
+    log.info(f"Writing new metadata with resolution {tree.resolution}")
+    tree.write_metadata()
 
     log.info("Done!")

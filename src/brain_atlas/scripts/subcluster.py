@@ -30,6 +30,9 @@ log = logging.getLogger(__name__)
     "--transform",
     type=click.Choice(["none", "sqrt", "log1p"], case_sensitive=False),
 )
+@click.option(
+    "-z/-Z", "--std/--no-std", "scaled", help="Standardize genes before PCA/kNN"
+)
 @click.option("--min-res", type=int, default=-9, help="Minimum resolution 10^MIN_RES")
 @click.option("--max-res", type=int, default=-1, help="Maximum resolution 5x10^MAX_RES")
 @click.option(
@@ -53,6 +56,7 @@ def main(
     n_pcs: int = None,
     k_neighbors: int = None,
     transform: str = None,
+    scaled: bool = None,
     min_res: int = -9,
     max_res: int = -1,
     min_gene_diff: float = 0.025,
@@ -89,6 +93,7 @@ def main(
         n_pcs=n_pcs or root.n_pcs,
         k_neighbors=k_neighbors or root.k_neighbors,
         transform=transform or root.transform,
+        scaled=scaled if scaled is not None else root.scaled,
         resolution=None,
     )
     log.debug(f"Saving results to {tree}")
@@ -129,6 +134,9 @@ def main(
     # subselect genes
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
         d_i_mem = tree.transform_fn(d_i[:, selected_genes].rechunk((2000, n_genes)))
+
+    if scaled:
+        d_i_mem = d_i_mem / da.std(d_i_mem, axis=0, keepdims=True)
 
     if tree.n_pcs is not None:
         # compute PCA on subset genes

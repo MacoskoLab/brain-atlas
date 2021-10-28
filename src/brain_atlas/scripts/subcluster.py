@@ -89,7 +89,7 @@ def main(
         n_pcs=n_pcs or root.n_pcs,
         k_neighbors=k_neighbors or root.k_neighbors,
         transform=transform or root.transform,
-        resolution=resolution,
+        resolution=None,
     )
     log.debug(f"Saving results to {tree}")
 

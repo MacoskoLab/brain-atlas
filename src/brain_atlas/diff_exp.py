@@ -53,7 +53,7 @@ def rankdata(data):
 def mannwhitneyu(x, y, use_continuity=True):
     """Version of Mann-Whitney U-test that runs in parallel on 2d arrays
 
-    this is the two-sided test, asymptotic algo only
+    This is the two-sided test, asymptotic algo only. Returns log p-values
     """
     x = np.asarray(x)
     y = np.asarray(y)
@@ -79,6 +79,6 @@ def mannwhitneyu(x, y, use_continuity=True):
     with np.errstate(divide="ignore", invalid="ignore"):
         z = (bigu - meanrank) / sd
 
-    p = np.clip(2 * scipy.stats.norm.sf(z), 0, 1)
+    logp = np.clip(2 * scipy.stats.norm.logsf(z), 0, 1)
 
-    return u2, p
+    return u2, logp

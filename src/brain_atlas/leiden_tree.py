@@ -16,6 +16,7 @@ class LeidenTree:
     :param n_pcs: number of PCs to use, if computing PCA
     :param k_neighbors: number of neighbors for kNN
     :param transform: transform for scaling counts (sqrt, log1p, or none)
+    :param scaled: standardize the genes before PCA/kNN
     :param resolution: the Leiden resolution used to define the clusters
     """
 
@@ -26,6 +27,7 @@ class LeidenTree:
         n_pcs: Optional[int],
         k_neighbors: int,
         transform: str = None,
+        scaled: bool = False,
         resolution: str = None,
     ):
         self.dir = tree_dir
@@ -47,6 +49,7 @@ class LeidenTree:
         else:
             raise ValueError(f"Unknown transform {transform}")
 
+        self.scaled = scaled
         self.resolution = resolution
 
     @staticmethod
@@ -99,6 +102,7 @@ class LeidenTree:
             "n_pcs": self.n_pcs,
             "k_neighbors": self.k_neighbors,
             "transform": self.transform,
+            "scaled": self.scaled,
             "resolution": self.resolution,
         }
 

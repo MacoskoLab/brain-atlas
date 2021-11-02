@@ -62,6 +62,31 @@ def write_knn_to_zarr(
 
 
 @nb.njit(parallel=True)
+def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray):
+    """
+    Convert a knn graph and distances into an array of unique edges with weights.
+    Removes self-edges
+    """
+    n, m = kng.shape
+    dists = np.vstack((np.repeat(np.arange(n), m), kng.flatten(), np.zeros(n * m))).T
+
+    for i in nb.prange(n):
+        for jj, j in enumerate(kng[i, :]):
+            if i < j:
+                # this edge is fine
+                dists[i * m + jj, 2] = 1 - knd[i, jj]
+            elif i > j:
+                for k in kng[j, :]:
+                    if i == k:
+                        # this is already included on the other end
+                        break
+                else:
+                    dists[i * m + jj, 2] = 1 - knd[i, jj]
+
+    return dists[dists[:, 2] > 0, :]
+
+
+@nb.njit(parallel=True)
 def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray):
     """
     Takes the knn graph and distances from pynndescent, computes unique mutual edges

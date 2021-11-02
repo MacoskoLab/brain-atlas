@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import dask.array as da
 import yaml
@@ -17,6 +17,7 @@ class LeidenTree:
     :param k_neighbors: number of neighbors for kNN
     :param transform: transform for scaling counts (sqrt, log1p, or none)
     :param scaled: standardize the genes before PCA/kNN
+    :param jaccard: compute shared nearest neighbors graph
     :param resolution: the Leiden resolution used to define the clusters
     """
 
@@ -28,6 +29,7 @@ class LeidenTree:
         k_neighbors: int,
         transform: str = None,
         scaled: bool = False,
+        jaccard: bool = True,
         resolution: str = None,
     ):
         self.dir = tree_dir
@@ -50,10 +52,11 @@ class LeidenTree:
             raise ValueError(f"Unknown transform {transform}")
 
         self.scaled = scaled
+        self.jaccard = jaccard
         self.resolution = resolution
 
     @staticmethod
-    def read_yaml(yaml_path: Path):
+    def read_yaml(yaml_path: Path) -> dict[str, Any]:
         with yaml_path.open() as fh:
             metadata = yaml.safe_load(fh)
 
@@ -78,6 +81,8 @@ class LeidenTree:
             return False
 
         metadata = LeidenTree.read_yaml(self.metadata_yaml)
+        # ignore the selected resolution when checking cache
+        metadata["resolution"] = self.resolution
 
         return self.metadata == metadata
 
@@ -103,6 +108,7 @@ class LeidenTree:
             "k_neighbors": self.k_neighbors,
             "transform": self.transform,
             "scaled": self.scaled,
+            "jaccard": self.jaccard,
             "resolution": self.resolution,
         }
 
@@ -116,15 +122,13 @@ class LeidenTree:
 
     @property
     def pca(self):
+        if self.n_pcs is None:
+            raise AttributeError("This tree does not have a PCA")
         return self.dir / "pca.zarr"
 
     @property
     def knn(self):
         return self.dir / "knn.zarr"
-
-    @property
-    def snn(self):
-        return self.dir / "snn.zarr"
 
     @property
     def clustering(self):

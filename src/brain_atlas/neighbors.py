@@ -14,8 +14,7 @@ def translate_kng(node_subset: np.ndarray, kng: np.ndarray):
     """
     Subset a kNN graph to only the edges between the included nodes, filling
     in the rest with random edges inside the range. Can be used to initialize
-    the creation of a new kNN for these nodes. Note: this adds a self-edge,
-    because NNDescent will expect it.
+    the creation of a new kNN for these nodes.
 
     :param node_subset: a boolean array specifying which nodes to include
     :param kng: the original k-neighbors graph to process into a new graph
@@ -25,10 +24,8 @@ def translate_kng(node_subset: np.ndarray, kng: np.ndarray):
     nz = node_subset.nonzero()[0]
     cs = (~node_subset).cumsum()
 
-    # values of -1 will be set to random neighbors
-    new_kng = -1 * np.ones((n_c, kng.shape[1] + 1), np.int32)
-    # add self-edge
-    new_kng[:, 0] = np.arange(n_c)
+    # values of -1 will be set to random neighbors by NNDescent
+    new_kng = -1 * np.ones((n_c, kng.shape[1]), np.int32)
 
     for ii in nb.prange(n_c):
         i = nz[ii]
@@ -65,7 +62,32 @@ def write_knn_to_zarr(
 
 
 @nb.njit(parallel=True)
+def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray):
+    """
+    Takes the knn graph and distances from pynndescent, computes unique mutual edges
+    and converts from distance to edge weight (1 - distance). Removes self-edges
+    """
+    n, m = kng.shape
+    dists = np.vstack((np.repeat(np.arange(n), m), kng.flatten(), np.zeros(n * m))).T
+
+    for i in nb.prange(n):
+        for jj, j in enumerate(kng[i, :]):
+            if j <= i:
+                # this edge is already included, or a self-edge
+                continue
+            for k in kng[j, :]:
+                if i == k:
+                    dists[i * m + jj, 2] = 1 - knd[i, jj]
+                    break
+
+    return dists[dists[:, 2] > 0, :]
+
+
+@nb.njit(parallel=True)
 def compute_jaccard_edges(kng: np.ndarray, min_dist=0.0625):
+    """
+    Takes the knn graph and computes jaccard shared-nearest-neighbor edges and weights
+    """
     n, m = kng.shape
     dists = np.vstack((np.repeat(np.arange(n), m), kng.flatten(), np.zeros(n * m))).T
 
@@ -73,6 +95,10 @@ def compute_jaccard_edges(kng: np.ndarray, min_dist=0.0625):
         kngs = set(kng[i, :])
 
         for jj, j in enumerate(kng[i, :]):
+            # skip self-edges
+            if i == j:
+                continue
+
             overlap = 0
             skip = False
             for k in kng[j, :]:

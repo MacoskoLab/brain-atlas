@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 import dask.array as da
 import yaml
@@ -56,7 +56,7 @@ class LeidenTree:
         self.resolution = resolution
 
     @staticmethod
-    def read_yaml(yaml_path: Path) -> dict[str, Any]:
+    def read_yaml(yaml_path: Path) -> Dict[str, Any]:
         with yaml_path.open() as fh:
             metadata = yaml.safe_load(fh)
 

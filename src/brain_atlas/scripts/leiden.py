@@ -1,5 +1,6 @@
 import logging
 from collections import Counter
+from typing import Dict, List
 
 import click
 import dask.array as da
@@ -20,9 +21,9 @@ def load_graph(n_cells: int, input_zarr: str):
 
 def leiden_sweep(
     graph: ig.Graph,
-    res_list: list[float],
+    res_list: List[float],
     cutoff: float = None,
-    cached_arrays: dict[float, np.ndarray] = None,
+    cached_arrays: Dict[float, np.ndarray] = None,
 ):
     membership = None
     opt = la.Optimiser()

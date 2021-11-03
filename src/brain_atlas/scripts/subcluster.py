@@ -33,6 +33,9 @@ log = logging.getLogger(__name__)
 @click.option(
     "-z/-Z", "--std/--no-std", "scaled", help="Standardize genes before PCA/kNN"
 )
+@click.option(
+    "--snn/--no-snn", "jaccard", help="Compute shared nearest neighbors graph"
+)
 @click.option("--min-res", type=int, default=-9, help="Minimum resolution 10^MIN_RES")
 @click.option("--max-res", type=int, default=-1, help="Maximum resolution 5x10^MAX_RES")
 @click.option(
@@ -57,6 +60,7 @@ def main(
     k_neighbors: int = None,
     transform: str = None,
     scaled: bool = None,
+    jaccard: bool = None,
     min_res: int = -9,
     max_res: int = -1,
     min_gene_diff: float = 0.025,
@@ -69,6 +73,8 @@ def main(
     Subclusters LEVEL of the ROOT_PATH Leiden tree, performing a sweep across
     the specified resolutions, stopping at the optional cutoff.
     """
+
+    # TODO: codepath for initial clustering
 
     root = LeidenTree.from_path(Path(root_path))
     ds = Dataset(str(root.data))
@@ -94,6 +100,7 @@ def main(
         k_neighbors=k_neighbors or root.k_neighbors,
         transform=transform or root.transform,
         scaled=scaled if scaled is not None else root.scaled,
+        jaccard=jaccard if jaccard is not None else root.jaccard,
         resolution=None,
     )
     log.debug(f"Saving results to {tree}")
@@ -101,6 +108,8 @@ def main(
     valid_cache = (not overwrite) and tree.is_valid_cache()
     if not valid_cache:
         tree.write_metadata()
+    else:
+        log.debug("Using cached values")
 
     ci = clusters == level[-1]
     n_cells = ci.sum()
@@ -173,7 +182,8 @@ def main(
 
     if valid_cache and tree.knn.exists():
         log.info(f"Loading cached kNN from {tree.knn}")
-        kng = da.from_zarr(str(tree.knn), "kng")
+        kng = da.from_zarr(str(tree.knn), "kng").compute()
+        knd = None  # will load if needed for edge list
     else:
         translated_kng = None
         if parent.knn.exists():
@@ -199,30 +209,27 @@ def main(
             init_graph=translated_kng,
         ).neighbor_graph
 
-        # remove self-edges
-        kng = kng[:, 1:].astype(np.int32)
-        knd = knd[:, 1:]
-
+        kng = kng.astype(np.int32)
         log.debug(f"Saving kNN to {tree.knn}")
         neighbors.write_knn_to_zarr(kng, knd, tree.knn, overwrite=overwrite)
 
-    if valid_cache and tree.snn.exists():
-        log.info(f"Loading cached SNN from {tree.snn}")
-
-        edges = da.from_zarr(str(tree.snn), "edges").compute()
-        weights = da.from_zarr(str(tree.snn), "weights").compute()
-    else:
+    if tree.jaccard:
         # compute jaccard on kNN
         log.info("Computing SNN")
         dists = neighbors.compute_jaccard_edges(kng)
+    else:
+        if knd is None:
+            log.debug(f"Loading kNN distances from {tree.knn}")
+            knd = da.from_zarr(str(tree.knn), "knd").compute()
 
-        log.debug(f"Saving SNN to {tree.snn}")
-        neighbors.write_jaccard_to_zarr(dists, tree.snn, overwrite=overwrite)
+        # compute cosine distance for mutual neighbors
+        log.info("Creating edge list")
+        dists = neighbors.kng_to_edgelist(kng, knd)
 
-        edges = dists[:, :2]
-        weights = dists[:, 2]
+    edges = dists[:, :2]
+    weights = dists[:, 2]
 
-    # create igraph from jaccard edges
+    # create igraph from edge list
     log.info("Building graph")
     graph = ig.Graph(n=n_cells, edges=edges, edge_attrs={"weight": weights})
 

@@ -74,6 +74,8 @@ def main(
     the specified resolutions, stopping at the optional cutoff.
     """
 
+    # TODO: codepath for initial clustering
+
     root = LeidenTree.from_path(Path(root_path))
     ds = Dataset(str(root.data))
 
@@ -181,6 +183,7 @@ def main(
     if valid_cache and tree.knn.exists():
         log.info(f"Loading cached kNN from {tree.knn}")
         kng = da.from_zarr(str(tree.knn), "kng").compute()
+        knd = None  # will load if needed for edge list
     else:
         translated_kng = None
         if parent.knn.exists():
@@ -215,17 +218,18 @@ def main(
         log.info("Computing SNN")
         dists = neighbors.compute_jaccard_edges(kng)
     else:
-        log.debug(f"Loading kNN distances from {tree.knn}")
-        knd = da.from_zarr(str(tree.knn), "knd").compute()
+        if knd is None:
+            log.debug(f"Loading kNN distances from {tree.knn}")
+            knd = da.from_zarr(str(tree.knn), "knd").compute()
 
         # compute cosine distance for mutual neighbors
-        log.info("Computing MNN")
-        dists = neighbors.compute_mutual_edges(kng, knd)
+        log.info("Creating edge list")
+        dists = neighbors.kng_to_edgelist(kng, knd)
 
     edges = dists[:, :2]
     weights = dists[:, 2]
 
-    # create igraph from jaccard edges
+    # create igraph from edge list
     log.info("Building graph")
     graph = ig.Graph(n=n_cells, edges=edges, edge_attrs={"weight": weights})
 

@@ -32,7 +32,8 @@ def create_logger(debug: bool = False, log_file: Path = None):
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
     stream_handler.setFormatter(formatter)
 

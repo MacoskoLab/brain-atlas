@@ -1,9 +1,7 @@
 import logging
 from collections import Counter
-from pathlib import Path
 from typing import Sequence
 
-import click
 import dask
 import dask.array as da
 import numpy as np
@@ -12,9 +10,6 @@ import scipy.cluster.hierarchy
 from brain_atlas.diff_exp import mannwhitneyu
 from brain_atlas.leiden_tree import LeidenTree
 from brain_atlas.util.dataset import Dataset
-
-# from numcodecs import Blosc
-
 
 log = logging.getLogger(__name__)
 
@@ -124,30 +119,8 @@ def hierarchical_diff_exp(data, clusters: np.ndarray, min_fc: float = 1.25):
     return diff_results
 
 
-@click.command("find_genes")
-@click.argument("root_path", type=click.Path(dir_okay=True, file_okay=False))
-@click.argument("level", type=int, nargs=-1)
-@click.option(
-    "-r", "--recursive", is_flag=True, help="Descend into subcluster directories"
-)
-@click.option(
-    "--min-fc", type=float, default=1.25, help="Minimum fold-change for testing"
-)
-@click.option("--overwrite", is_flag=True, help="Don't use any cached results")
-def main(
-    root_path: str,
-    level: Sequence[int],
-    min_fc: float = 1.25,
-):
-    """
-    Loads selected genes from LEVEL of the ROOT_PATH Leiden tree and performs
-    Mann-Whitney U tests to identify significant markers for each cluster
-    """
-
-    root = LeidenTree.from_path(Path(root_path))
-    ds = Dataset(str(root.data))
-
-    tree = LeidenTree.from_path(root.subcluster_path(level))
+def process_tree(tree: LeidenTree, min_fc: float = 1.25):
+    ds = Dataset(str(tree.data))
 
     clusters = np.load(tree.clustering)
     if tree.resolution is None:
@@ -174,4 +147,4 @@ def main(
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
         d_i_mem = d_i[:, selected_genes].rechunk({1: n_genes}).persist()
 
-    hierarchical_diff_exp(d_i_mem, ci_clusters, min_fc)
+    return hierarchical_diff_exp(d_i_mem, ci_clusters, min_fc)

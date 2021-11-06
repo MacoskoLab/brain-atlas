@@ -74,24 +74,31 @@ def main(
     the specified resolutions, stopping at the optional cutoff.
     """
 
-    # TODO: codepath for initial clustering
-
     root = LeidenTree.from_path(Path(root_path))
     ds = Dataset(str(root.data))
 
-    # open the tree one level up (this might be the root)
-    parent = LeidenTree.from_path(root.subcluster_path(level[:-1]))
-    clusters = np.load(parent.clustering)
-    if resolution is None:
-        if parent.resolution is None:
-            # use the largest resolution present in the file
-            resolution = max(clusters, key=float)
-        else:
-            resolution = parent.resolution
+    # check if we are clustering the root (e.g. no parent)
+    if len(level) == 0:
+        parent = root  # for cache purposes
 
-    log.debug(f"Using parent clustering with resolution {resolution}")
-    clusters: np.ndarray = clusters[resolution]
-    assert clusters.shape[0] == ds.counts.shape[0], "Clusters do not match input data"
+        log.debug("Using all-zero clustering for root")
+        clusters = np.zeros(ds.counts.shape[0], dtype=np.int32)
+        ci = np.ones_like(clusters, dtype=bool)
+    else:
+        # open the tree one level up
+        parent = LeidenTree.from_path(root.subcluster_path(level[:-1]))
+        clusters = np.load(parent.clustering)
+        if resolution is None:
+            if parent.resolution is None:
+                # use the largest resolution present in the file
+                resolution = max(clusters, key=float)
+            else:
+                resolution = parent.resolution
+
+        log.debug(f"Using parent clustering with resolution {resolution}")
+        clusters: np.ndarray = clusters[resolution]
+        ci = clusters == level[-1]
+        assert ci.shape[0] == ds.counts.shape[0], "Clusters do not match input data"
 
     tree = LeidenTree(
         root.subcluster_path(level),
@@ -111,7 +118,6 @@ def main(
     else:
         log.debug("Using cached values")
 
-    ci = clusters == level[-1]
     n_cells = ci.sum()
     assert n_cells > 0, "No cells to process"
 
@@ -125,8 +131,7 @@ def main(
     else:
         exp_pct_nz, pct, ds_p = dask_pblock(d_i, numis=ds.numis[ci, :])
 
-        gene_cutoff = max(min_gene_diff, np.percentile(exp_pct_nz - pct, 90))
-        selected_genes = (exp_pct_nz - pct > gene_cutoff).nonzero()[0]
+        selected_genes = (exp_pct_nz - pct > min_gene_diff).nonzero()[0]
         n_genes = selected_genes.shape[0]
 
         # save output

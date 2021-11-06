@@ -13,8 +13,8 @@ from pynndescent import NNDescent
 
 import brain_atlas.neighbors as neighbors
 from brain_atlas.gene_selection import dask_pblock
+from brain_atlas.leiden import leiden_sweep
 from brain_atlas.leiden_tree import LeidenTree
-from brain_atlas.scripts.leiden import leiden_sweep
 from brain_atlas.util.dataset import Dataset
 
 log = logging.getLogger(__name__)

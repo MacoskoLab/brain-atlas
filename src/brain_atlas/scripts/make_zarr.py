@@ -7,8 +7,8 @@ import zarr
 from numcodecs import Blosc
 from tqdm.auto import tqdm
 
-from ..util import optional_gzip
-from ..util.h5 import read_10x_h5
+from brain_atlas.util import optional_gzip
+from brain_atlas.util.h5 import read_10x_h5
 
 log = logging.getLogger(__name__)
 

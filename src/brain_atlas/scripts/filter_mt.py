@@ -4,13 +4,14 @@ import click
 import dask
 import numpy as np
 
+from brain_atlas.scripts import cli
 from brain_atlas.util import optional_gzip
 from brain_atlas.util.dataset import Dataset
 
 log = logging.getLogger(__name__)
 
 
-@click.command(name="filter_mt", no_args_is_help=True)
+@cli.command(name="filter-mt", no_args_is_help=True)
 @click.argument("input-zarr", type=click.Path(dir_okay=True, file_okay=False))
 @click.argument("output-zarr", type=click.Path(dir_okay=True, file_okay=False))
 @click.option("-g", "--genes", required=True, type=click.Path(exists=True))

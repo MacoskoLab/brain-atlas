@@ -13,13 +13,12 @@ import brain_atlas.neighbors as neighbors
 from brain_atlas.gene_selection import dask_pblock
 from brain_atlas.leiden import leiden_sweep
 from brain_atlas.leiden_tree import LeidenTree
-from brain_atlas.scripts import cli
 from brain_atlas.util.dataset import Dataset
 
 log = logging.getLogger(__name__)
 
 
-@cli.command("subcluster-p")
+@click.command("subcluster-p")
 @click.argument("root-path", type=click.Path(dir_okay=True, file_okay=False))
 @click.argument("level", type=int, nargs=-1)
 @click.option("-k", "--k-neighbors", type=int)

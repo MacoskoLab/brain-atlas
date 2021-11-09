@@ -7,14 +7,13 @@ import zarr
 from numcodecs import Blosc
 from tqdm.auto import tqdm
 
-from brain_atlas.scripts import cli
 from brain_atlas.util import optional_gzip
 from brain_atlas.util.h5 import read_10x_h5
 
 log = logging.getLogger(__name__)
 
 
-@cli.command(name="make-zarr", no_args_is_help=True)
+@click.command(name="make-zarr", no_args_is_help=True)
 @click.argument("h5-files", nargs=-1, metavar="H5_FILE [H5_FILE ... ]")
 @click.option(
     "--output-zarr", required=True, type=click.Path(dir_okay=True, file_okay=False)

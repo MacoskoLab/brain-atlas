@@ -114,7 +114,7 @@ def main(
     else:
         exp_pct_nz, pct, ds_p = dask_pblock(d_i, numis=ds.numis[ci, :])
 
-        selected_genes = (exp_pct_nz - pct > min_gene_diff).nonzero()[0]
+        selected_genes = ((exp_pct_nz - pct > min_gene_diff) & (ds_p < -5)).nonzero()[0]
         n_genes = selected_genes.shape[0]
 
         # save output

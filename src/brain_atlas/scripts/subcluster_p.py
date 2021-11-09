@@ -133,7 +133,7 @@ def main(
         knn_data = da.sign(d_i[:, selected_genes]).compute()
 
     # replace binary values with exp_pct_nz values
-    knn_data = knn_data * exp_pct_nz
+    knn_data = knn_data * exp_pct_nz[selected_genes]
     knn_metric = "cosine"
 
     if valid_cache and tree.knn.exists():

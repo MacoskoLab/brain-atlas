@@ -32,6 +32,21 @@ def calc_log_fc(
     return log_fc
 
 
+def calc_nz(
+    count_array: np.ndarray,
+    nz_array: np.ndarray,
+    group1: Sequence[int],
+    group2: Sequence[int],
+):
+    left_n = count_array[group1].sum()
+    left_nz = nz_array[group1, :].sum(axis=0) / left_n
+
+    right_n = count_array[group2].sum()
+    right_nz = nz_array[group2, :].sum(axis=0) / right_n
+
+    return left_nz, right_nz
+
+
 def de(
     ds: da.array,
     clusters: np.ndarray,
@@ -59,22 +74,26 @@ def de(
     return full_u, full_p
 
 
-def hierarchical_diff_exp(data, clusters: np.ndarray, min_fc: float = 1.25):
+def hierarchical_diff_exp(
+    data, clusters: np.ndarray, delta_nz: float = 0.2, max_nz_b: float = 0.2
+):
     n_cells = data.shape[0]
     cluster_counts = Counter(clusters)
-    min_log_fc = np.log(min_fc)
 
     cluster_sums = {}
+    cluster_nz = {}
     for i in cluster_counts:
         if cluster_counts[i] > np.sqrt(n_cells):
             cluster_sums[i] = data[clusters == i, :].sum(0).compute()
+            cluster_nz[i] = da.sign(data[clusters == i, :]).sum(0).compute()
 
     n_clusters = len(cluster_sums)
-    cluster_sum_array = np.vstack([cluster_sums[i] for i in range(n_clusters)])
-    cluster_count_array = np.array([cluster_counts[i] for i in range(n_clusters)])
+    cluster_sums = np.vstack([cluster_sums[i] for i in range(n_clusters)])
+    cluster_nz = np.vstack([cluster_nz[i] for i in range(n_clusters)])
+    cluster_counts = np.array([cluster_counts[i] for i in range(n_clusters)])
 
     z = scipy.cluster.hierarchy.linkage(
-        cluster_sum_array / cluster_count_array[:, None],
+        cluster_sums / cluster_counts[:, None],
         method="average",
         metric="cosine",
     )
@@ -96,10 +115,13 @@ def hierarchical_diff_exp(data, clusters: np.ndarray, min_fc: float = 1.25):
 
             log.debug(f"Comparing {left} with {right}")
 
-            log_fc = calc_log_fc(cluster_count_array, cluster_sum_array, left, right)
+            nzA, nzB = calc_nz(cluster_counts, cluster_nz, left, right)
+            min_nz = np.minimum(nzA, nzB)
+            nz_diff = np.abs(nzA - nzB)
+            nz_filter = (min_nz < max_nz_b) & (nz_diff > delta_nz)
 
-            u, p = de(data, clusters, left, right, log_fc > min_log_fc)
-            diff_results[tuple(left), tuple(right)] = u, p, log_fc
+            u, p = de(data, clusters, left, right, nz_filter)
+            diff_results[tuple(left), tuple(right)] = u, p, nz_diff
 
         if i < 2 * n_clusters - 2:
             below = rd[i].pre_order(lambda x: x.id)
@@ -111,15 +133,23 @@ def hierarchical_diff_exp(data, clusters: np.ndarray, min_fc: float = 1.25):
 
             log.debug(f"Comparing {below} with {above}")
 
-            log_fc = calc_log_fc(cluster_count_array, cluster_sum_array, below, above)
+            nzA, nzB = calc_nz(cluster_counts, cluster_nz, below, above)
+            min_nz = np.minimum(nzA, nzB)
+            nz_diff = np.abs(nzA - nzB)
+            nz_filter = (min_nz < max_nz_b) & (nz_diff > delta_nz)
 
-            u, p = de(data, clusters, below, above, log_fc > min_log_fc)
-            diff_results[tuple(below), tuple(above)] = u, p, log_fc
+            u, p = de(data, clusters, below, above, nz_filter)
+            diff_results[tuple(below), tuple(above)] = u, p, nz_diff
 
     return diff_results
 
 
-def process_tree(tree: LeidenTree, min_fc: float = 1.25):
+def process_tree(
+    tree: LeidenTree,
+    delta_nz: float = 0.2,
+    max_nz_b: float = 0.2,
+    selected_only: bool = True,
+):
     ds = Dataset(str(tree.data))
 
     clusters = np.load(tree.clustering)
@@ -139,12 +169,16 @@ def process_tree(tree: LeidenTree, min_fc: float = 1.25):
     log.info(f"Processing {n_cells} / {clusters.shape[0]} cells from {tree.data}")
     d_i = ds.counts[ci, :]
 
-    log.debug(f"Loading selected genes from {tree.selected_genes}")
-    selected_genes = np.load(tree.selected_genes)["selected_genes"]
-    n_genes = selected_genes.shape[0]
+    if selected_only:
+        log.debug(f"Loading selected genes from {tree.selected_genes}")
+        selected_genes = np.load(tree.selected_genes)["selected_genes"]
+        n_genes = selected_genes.shape[0]
 
-    # subselect genes
-    with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-        d_i_mem = d_i[:, selected_genes].rechunk({1: n_genes}).persist()
+        # subselect genes
+        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+            d_i_mem = d_i[:, selected_genes].rechunk({1: n_genes}).persist()
+    else:
+        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+            d_i_mem = d_i.persist()
 
-    return hierarchical_diff_exp(d_i_mem, ci_clusters, min_fc)
+    return hierarchical_diff_exp(d_i_mem, ci_clusters, delta_nz, max_nz_b)

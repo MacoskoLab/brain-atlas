@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 class Dataset:
     COUNTS = "counts"
     NUMIS = "numis"
-    CHUNKS = (4000, 4000)
+    CHUNKS = 4000
 
     def __init__(
         self, input_zarr: str, count_array: str = COUNTS, numi_array: str = NUMIS
@@ -31,6 +31,7 @@ class Dataset:
             log.warning("Computing numis per cell")
             numis = count_array.sum(1, keepdims=True)
 
+        numis = numis.rechunk((Dataset.CHUNKS, 1))
         numis.to_zarr(
             output_zarr,
             Dataset.NUMIS,

@@ -43,10 +43,10 @@ def main(
     log.debug(f"Reading from {input_zarr}")
     ds = Dataset(input_zarr)
 
-    mdist = ds.counts[:, mito_idx].sum(1)
-
     log.info("Computing mitochondrial ratio")
-    m_ratio = (mdist / ds.numis).compute()
+    with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+        mdist = ds.counts[:, mito_idx].sum(1, keepdims=True)
+        m_ratio = (mdist / ds.numis).compute().flatten()
 
     log.info(
         "Mitochondrial distribution:\n"

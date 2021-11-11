@@ -47,6 +47,22 @@ def calc_nz(
     return left_nz, right_nz
 
 
+def calc_filter(
+    cluster_counts: np.ndarray,
+    cluster_nz: np.ndarray,
+    group1: Sequence[int],
+    group2: Sequence[int],
+    max_nz_b: float,
+    delta_nz: float,
+):
+    nzA, nzB = calc_nz(cluster_counts, cluster_nz, group1, group2)
+    min_nz = np.minimum(nzA, nzB)
+    nz_diff = nzA - nzB
+    nz_filter = (min_nz < max_nz_b) & (np.abs(nz_diff) > delta_nz)
+
+    return nz_diff, nz_filter
+
+
 def de(
     ds: da.array,
     clusters: np.ndarray,
@@ -60,16 +76,17 @@ def de(
     c_a = np.isin(clusters, group1)
     c_b = np.isin(clusters, group2)
 
-    ds_a = ds[c_a, :].compute()
-    ds_b = ds[c_b, :].compute()
-
     full_u = np.zeros(ds.shape[1])
     full_p = np.zeros(ds.shape[1])  # logp, no result = 0
 
-    u, logp = mannwhitneyu(ds_a[:, gene_filter], ds_b[:, gene_filter])
+    if np.any(gene_filter):
+        ds_a = ds[c_a, :].compute()
+        ds_b = ds[c_b, :].compute()
 
-    full_u[gene_filter] = u
-    full_p[gene_filter] = logp
+        u, logp = mannwhitneyu(ds_a[:, gene_filter], ds_b[:, gene_filter])
+
+        full_u[gene_filter] = u
+        full_p[gene_filter] = logp
 
     return full_u, full_p
 
@@ -77,17 +94,17 @@ def de(
 def hierarchical_diff_exp(
     data, clusters: np.ndarray, delta_nz: float = 0.2, max_nz_b: float = 0.2
 ):
-    n_cells = data.shape[0]
-    cluster_counts = Counter(clusters)
+    cluster_counts = Counter(clusters[clusters > -1])
+    n_clusters = len(cluster_counts)
+    assert sorted(range(n_clusters)) == sorted(cluster_counts)
 
     cluster_sums = {}
     cluster_nz = {}
-    for i in cluster_counts:
-        if cluster_counts[i] > np.sqrt(n_cells):
-            cluster_sums[i] = data[clusters == i, :].sum(0).compute()
-            cluster_nz[i] = da.sign(data[clusters == i, :]).sum(0).compute()
 
-    n_clusters = len(cluster_sums)
+    for i in cluster_counts:
+        cluster_sums[i] = data[clusters == i, :].sum(0).compute()
+        cluster_nz[i] = da.sign(data[clusters == i, :]).sum(0).compute()
+
     cluster_sums = np.vstack([cluster_sums[i] for i in range(n_clusters)])
     cluster_nz = np.vstack([cluster_nz[i] for i in range(n_clusters)])
     cluster_counts = np.array([cluster_counts[i] for i in range(n_clusters)])
@@ -114,14 +131,12 @@ def hierarchical_diff_exp(
                 continue
 
             log.debug(f"Comparing {left} with {right}")
-
-            nzA, nzB = calc_nz(cluster_counts, cluster_nz, left, right)
-            min_nz = np.minimum(nzA, nzB)
-            nz_diff = np.abs(nzA - nzB)
-            nz_filter = (min_nz < max_nz_b) & (nz_diff > delta_nz)
+            nz_diff, nz_filter = calc_filter(
+                cluster_counts, cluster_nz, left, right, max_nz_b, delta_nz
+            )
 
             u, p = de(data, clusters, left, right, nz_filter)
-            diff_results[tuple(left), tuple(right)] = u, p, nz_diff
+            diff_results[tuple(left), tuple(right)] = u, p, nz_diff, nz_filter
 
         if i < 2 * n_clusters - 2:
             below = rd[i].pre_order(lambda x: x.id)
@@ -132,14 +147,12 @@ def hierarchical_diff_exp(
                 continue
 
             log.debug(f"Comparing {below} with {above}")
-
-            nzA, nzB = calc_nz(cluster_counts, cluster_nz, below, above)
-            min_nz = np.minimum(nzA, nzB)
-            nz_diff = np.abs(nzA - nzB)
-            nz_filter = (min_nz < max_nz_b) & (nz_diff > delta_nz)
+            nz_diff, nz_filter = calc_filter(
+                cluster_counts, cluster_nz, below, above, max_nz_b, delta_nz
+            )
 
             u, p = de(data, clusters, below, above, nz_filter)
-            diff_results[tuple(below), tuple(above)] = u, p, nz_diff
+            diff_results[tuple(below), tuple(above)] = u, p, nz_diff, nz_filter
 
     return diff_results
 

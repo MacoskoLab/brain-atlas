@@ -79,6 +79,6 @@ def mannwhitneyu(x, y, use_continuity=True):
     with np.errstate(divide="ignore", invalid="ignore"):
         z = (bigu - meanrank) / sd
 
-    logp = np.clip(2 * scipy.stats.norm.logsf(z), 0, 1)
+    logp = np.minimum(scipy.stats.norm.logsf(z) + np.log(2), 0)
 
     return u2, logp

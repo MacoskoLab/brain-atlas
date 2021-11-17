@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 @click.option(
     "--min-gene-diff",
     type=float,
-    default=0.025,
+    default=0.05,
     help="Minimum cutoff for calling differential genes",
 )
 @click.option(
@@ -63,7 +63,7 @@ def main(
     jaccard: bool = None,
     min_res: int = -9,
     max_res: int = -1,
-    min_gene_diff: float = 0.025,
+    min_gene_diff: float = 0.05,
     cutoff: float = 5.0,
     resolution: str = None,
     overwrite: bool = False,
@@ -126,7 +126,8 @@ def main(
 
     if valid_cache and tree.selected_genes.exists():
         log.info(f"Loading cached gene selection from {tree.selected_genes}")
-        selected_genes = np.load(tree.selected_genes)["selected_genes"]
+        with np.load(tree.selected_genes) as d:
+            selected_genes = d["selected_genes"]
         n_genes = selected_genes.shape[0]
     else:
         exp_pct_nz, pct, ds_p = dask_pblock(d_i, numis=ds.numis[ci, :])
@@ -221,22 +222,18 @@ def main(
     if tree.jaccard:
         # compute jaccard on kNN
         log.info("Computing SNN")
-        dists = neighbors.compute_jaccard_edges(kng)
+        edges = neighbors.compute_jaccard_edges(kng)
     else:
         if knd is None:
             log.debug(f"Loading kNN distances from {tree.knn}")
             knd = da.from_zarr(str(tree.knn), "knd").compute()
 
-        # compute cosine distance for mutual neighbors
         log.info("Creating edge list")
-        dists = neighbors.kng_to_edgelist(kng, knd)
-
-    edges = dists[:, :2]
-    weights = dists[:, 2]
+        edges = neighbors.kng_to_edgelist(kng, knd)
 
     # create igraph from edge list
     log.info("Building graph")
-    graph = ig.Graph(n=n_cells, edges=edges, edge_attrs={"weight": weights})
+    graph = ig.Graph(n=n_cells, edges=edges[:, :2], edge_attrs={"weight": edges[:, 2]})
 
     if high_res:
         bs = range(1, 10)

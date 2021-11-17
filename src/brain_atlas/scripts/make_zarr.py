@@ -8,6 +8,7 @@ from numcodecs import Blosc
 from tqdm.auto import tqdm
 
 from brain_atlas.util import optional_gzip
+from brain_atlas.util.dataset import Dataset
 from brain_atlas.util.h5 import read_10x_h5
 
 log = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ log = logging.getLogger(__name__)
 @click.option("--output-genes", type=click.Path())
 @click.option("--min-umis", type=int, default=500)
 def main(
-    *h5_files: str,
+    h5_files: str,
     output_zarr: str,
     output_cells: str = None,
     output_genes: str = None,
@@ -37,11 +38,21 @@ def main(
     gid_set = set()
 
     log.info(f"writing output to {output_zarr}")
-    z = zarr.create(
-        store=output_zarr,
+    g = zarr.open_group(store=output_zarr, mode="w")
+
+    z = g.create_dataset(
+        name=Dataset.COUNTS,
         shape=(0, 0),
-        chunks=(4000, 4000),
+        chunks=Dataset.CHUNKS,
         dtype=np.int32,
+        compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
+    )
+
+    z_u = g.create_dataset(
+        name=Dataset.NUMIS,
+        shape=(0, 1),
+        chunks=(Dataset.CHUNKS, 1),
+        dtype=np.int64,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
 
@@ -54,12 +65,16 @@ def main(
         gene_set.add(mgenes)
         gid_set.add(mgids)
 
-        over_min = np.asarray(m.sum(1) >= min_umis).squeeze()
+        numis = np.asarray(m.sum(1)).squeeze()
+        over_min = numis >= min_umis
         m = m[over_min, :].tocoo()
 
         z.resize(i + m.shape[0], m.shape[1])
         z.set_coordinate_selection((m.row + i, m.col), m.data)
         cell_lists.append([c for c, b in zip(mcells, over_min) if b])
+
+        z_u.resize(i + m.shape[0], 1)
+        z_u[i:, 0] = numis[over_min]
 
     log.info(f"Wrote a total of {z.shape[0]} cells")
 

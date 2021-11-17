@@ -35,12 +35,6 @@ log = logging.getLogger(__name__)
     default=0.05,
     help="Minimum cutoff for calling differential genes",
 )
-@click.option(
-    "--cutoff",
-    type=float,
-    default=5.0,
-    help="Stop clustering when cluster0/cluster1 is below this ratio",
-)
 @click.option("--resolution", type=str, help="Resolution to use from parent clustering")
 @click.option("--overwrite", is_flag=True, help="Don't use any cached results")
 @click.option("--high-res", is_flag=True, help="Use a more granular resolution sweep")
@@ -52,7 +46,6 @@ def main(
     min_res: int = -9,
     max_res: int = -1,
     min_gene_diff: float = 0.05,
-    cutoff: float = 5.0,
     resolution: str = None,
     overwrite: bool = False,
     high_res: bool = False,
@@ -196,7 +189,9 @@ def main(
     # leiden on igraph on range of resolution values
     # find lowest non-trivial resolution (count0 / count1 < some_max_value)
     res_list = [float(f"{b}e{p}") for p in range(min_res, max_res + 1) for b in bs]
-    res_arrays, _ = leiden_sweep(graph, res_list, cutoff, cached_arrays=cached_arrays)
+    res_arrays, _ = leiden_sweep(
+        graph, res_list, np.sqrt(n_cells), cached_arrays=cached_arrays
+    )
 
     clusterings = {}
     for res in sorted(res_arrays):

@@ -22,6 +22,11 @@ log = logging.getLogger(__name__)
 @click.argument("root-path", type=click.Path(dir_okay=True, file_okay=False))
 @click.argument("level", type=int, nargs=-1)
 @click.option("-k", "--k-neighbors", type=int)
+@click.option(
+    "-t",
+    "--transform",
+    type=click.Choice(["none", "sqrt", "log1p"], case_sensitive=False),
+)
 @click.option("--min-res", type=int, default=-9, help="Minimum resolution 10^MIN_RES")
 @click.option("--max-res", type=int, default=-1, help="Maximum resolution 5x10^MAX_RES")
 @click.option(
@@ -43,6 +48,7 @@ def main(
     root_path: str,
     level: Sequence[int],
     k_neighbors: int = None,
+    transform: str = None,
     min_res: int = -9,
     max_res: int = -1,
     min_gene_diff: float = 0.05,
@@ -87,7 +93,7 @@ def main(
         data=root.data,
         n_pcs=None,
         k_neighbors=k_neighbors or root.k_neighbors,
-        transform="pval",
+        transform=transform or root.transform,
         scaled=False,
         jaccard=False,
         resolution=None,
@@ -109,7 +115,6 @@ def main(
     if valid_cache and tree.selected_genes.exists():
         log.info(f"Loading cached gene selection from {tree.selected_genes}")
         with np.load(tree.selected_genes) as d:
-            exp_pct_nz = d["exp_pct_nz"]
             selected_genes = d["selected_genes"]
     else:
         exp_pct_nz, pct, ds_p = dask_pblock(d_i, numis=ds.numis[ci, :])
@@ -128,12 +133,9 @@ def main(
             selected_genes=selected_genes,
         )
 
-    # subselect genes and convert to binary values
+    # subselect genes
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-        knn_data = da.sign(d_i[:, selected_genes]).compute()
-
-    # replace binary values with exp_pct_nz values
-    knn_data = knn_data * exp_pct_nz[selected_genes]
+        knn_data = tree.transform_fn(d_i[:, selected_genes]).compute()
 
     if knn_data.shape[0] < tree.k_neighbors ** 2:
         # for small arrays, it is faster to compute the full pairwise distance

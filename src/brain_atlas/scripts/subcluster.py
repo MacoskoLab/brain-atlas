@@ -75,7 +75,7 @@ def main(
     """
 
     root = LeidenTree.from_path(Path(root_path))
-    ds = Dataset(str(root.data))
+    ds = Dataset(root.data)
 
     # check if we are clustering the root (e.g. no parent)
     if len(level) == 0:
@@ -161,7 +161,7 @@ def main(
 
         if valid_cache and tree.pca.exists():
             log.info(f"Loading cached PCA from {tree.pca}")
-            ipca = da.from_zarr(str(tree.pca)).compute()
+            ipca = da.from_zarr(tree.pca).compute()
         else:
             log.info("Computing PCA")
             ipca = (
@@ -174,7 +174,7 @@ def main(
 
             log.debug(f"Saving PCA to {tree.pca}")
             da.array(ipca).rechunk((40000, n_pcs)).to_zarr(
-                str(tree.pca),
+                tree.pca,
                 compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
                 overwrite=overwrite,
             )
@@ -188,7 +188,7 @@ def main(
 
     if valid_cache and tree.knn.exists():
         log.info(f"Loading cached kNN from {tree.knn}")
-        kng = da.from_zarr(str(tree.knn), "kng").compute()
+        kng = da.from_zarr(tree.knn, "kng").compute()
         knd = None  # will load if needed for edge list
     else:
         translated_kng = None
@@ -226,7 +226,7 @@ def main(
     else:
         if knd is None:
             log.debug(f"Loading kNN distances from {tree.knn}")
-            knd = da.from_zarr(str(tree.knn), "knd").compute()
+            knd = da.from_zarr(tree.knn, "knd").compute()
 
         log.info("Creating edge list")
         edges = neighbors.kng_to_edgelist(kng, knd)

@@ -163,7 +163,7 @@ def process_tree(
     max_nz_b: float = 0.2,
     selected_only: bool = True,
 ):
-    ds = Dataset(str(tree.data))
+    ds = Dataset(tree.data)
 
     clusters = np.load(tree.clustering)
     if tree.resolution is None:

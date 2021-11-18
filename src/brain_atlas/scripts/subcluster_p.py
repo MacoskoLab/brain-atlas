@@ -56,7 +56,7 @@ def main(
     """
 
     root = LeidenTree.from_path(Path(root_path))
-    ds = Dataset(str(root.data))
+    ds = Dataset(root.data)
 
     # check if we are clustering the root (e.g. no parent)
     if len(level) == 0:
@@ -137,13 +137,13 @@ def main(
     else:
         if valid_cache and tree.knn.exists():
             log.info(f"Loading cached kNN from {tree.knn}")
-            kng = da.from_zarr(str(tree.knn), "kng").compute()
-            knd = da.from_zarr(str(tree.knn), "knd").compute()
+            kng = da.from_zarr(tree.knn, "kng").compute()
+            knd = da.from_zarr(tree.knn, "knd").compute()
         else:
             translated_kng = None
             if parent.knn.exists():
                 log.debug(f"loading existing kNN graph from {parent.knn}")
-                original_kng = da.from_zarr(str(parent.knn), "kng")
+                original_kng = da.from_zarr(parent.knn, "kng")
                 if original_kng.shape[0] == ci.shape[0]:
                     translated_kng = neighbors.translate_kng(ci, original_kng.compute())
                 elif original_kng.shape[0] == (clusters > -1).sum():

@@ -1,5 +1,6 @@
 import logging
-from os import PathLike
+from pathlib import Path
+from typing import Union
 
 import dask.array as da
 import numba as nb
@@ -41,20 +42,20 @@ def translate_kng(node_subset: np.ndarray, kng: np.ndarray):
 def write_knn_to_zarr(
     kng: np.ndarray,
     knd: np.ndarray,
-    zarr_path: PathLike,
+    zarr_path: Union[str, Path],
     chunk_rows: int = 100000,
     overwrite: bool = False,
 ):
     log.debug(f"Writing neighbor graph to {zarr_path}/kng")
     da.array(kng.astype(np.int32)).rechunk((chunk_rows, kng.shape[1])).to_zarr(
-        str(zarr_path),
+        zarr_path,
         "kng",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
     log.debug(f"Writing edge distances to {zarr_path}/knd")
     da.array(knd).rechunk((chunk_rows, knd.shape[1])).to_zarr(
-        str(zarr_path),
+        zarr_path,
         "knd",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
@@ -189,20 +190,20 @@ def compute_jaccard_edges(kng: np.ndarray, min_weight: float = 1 / 16):
 
 def write_edges_to_zarr(
     edges: np.ndarray,
-    zarr_path: PathLike,
+    zarr_path: Union[str, Path],
     chunk_rows: int = 100000,
     overwrite: bool = False,
 ):
     log.debug(f"Writing edges to {zarr_path}/edges")
     da.array(edges[:, :2].astype(np.int32)).rechunk((chunk_rows, 2)).to_zarr(
-        str(zarr_path),
+        zarr_path,
         "edges",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
     log.debug(f"Writing edge weights to {zarr_path}/weights")
     da.array(edges[:, 2]).rechunk((chunk_rows,)).to_zarr(
-        str(zarr_path),
+        zarr_path,
         "weights",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),

@@ -62,7 +62,7 @@ def write_knn_to_zarr(
 
 
 @nb.njit(parallel=True)
-def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray):
+def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
     """
     Convert a knn graph and distances into an array of unique edges with weights.
     Removes self-edges
@@ -83,7 +83,7 @@ def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray):
                 else:
                     edges[i * m + jj, 2] = 1 - knd[i, jj]
 
-    return edges[edges[:, 2] > 0, :]
+    return edges[edges[:, 2] > min_weight, :]
 
 
 @nb.njit
@@ -111,7 +111,7 @@ def cosine_similarity(u: np.ndarray, v: np.ndarray):
 
 
 @nb.njit(parallel=True)
-def cosine_edgelist(data: np.ndarray):
+def cosine_edgelist(data: np.ndarray, min_weight: float = 0.0):
     """
     Compute the all-by-all cosine similarity graph directly from data.
 
@@ -128,11 +128,12 @@ def cosine_edgelist(data: np.ndarray):
             edges[ix, 0] = i
             edges[ix, 1] = j
             edges[ix, 2] = cosine_similarity(data[i, :], data[j, :])
-    return edges
+
+    return edges[edges[:, 2] > min_weight, :]
 
 
 @nb.njit(parallel=True)
-def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray):
+def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
     """
     Takes the knn graph and distances from pynndescent, computes unique mutual edges
     and converts from distance to edge weight (1 - distance). Removes self-edges
@@ -150,11 +151,11 @@ def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray):
                     edges[i * m + jj, 2] = 1 - knd[i, jj]
                     break
 
-    return edges[edges[:, 2] > 0, :]
+    return edges[edges[:, 2] > min_weight, :]
 
 
 @nb.njit(parallel=True)
-def compute_jaccard_edges(kng: np.ndarray, min_dist=0.0625):
+def compute_jaccard_edges(kng: np.ndarray, min_weight: float = 1 / 16):
     """
     Takes the knn graph and computes jaccard shared-nearest-neighbor edges and weights
     """
@@ -183,26 +184,24 @@ def compute_jaccard_edges(kng: np.ndarray, min_dist=0.0625):
                 d = overlap / (2 * m - overlap)
                 edges[i * m + jj, 2] = d
 
-    return edges[edges[:, 2] > min_dist, :]
+    return edges[edges[:, 2] > min_weight, :]
 
 
-def write_jaccard_to_zarr(
-    jaccard_edge_array: np.ndarray,
+def write_edges_to_zarr(
+    edges: np.ndarray,
     zarr_path: PathLike,
     chunk_rows: int = 100000,
     overwrite: bool = False,
 ):
-    log.debug(f"Writing jaccard edges to {zarr_path}/edges")
-    da.array(jaccard_edge_array[:, :2].astype(np.int32)).rechunk(
-        (chunk_rows, 2)
-    ).to_zarr(
+    log.debug(f"Writing edges to {zarr_path}/edges")
+    da.array(edges[:, :2].astype(np.int32)).rechunk((chunk_rows, 2)).to_zarr(
         str(zarr_path),
         "edges",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
     log.debug(f"Writing edge weights to {zarr_path}/weights")
-    da.array(jaccard_edge_array[:, 2]).rechunk((chunk_rows,)).to_zarr(
+    da.array(edges[:, 2]).rechunk((chunk_rows,)).to_zarr(
         str(zarr_path),
         "weights",
         overwrite=overwrite,

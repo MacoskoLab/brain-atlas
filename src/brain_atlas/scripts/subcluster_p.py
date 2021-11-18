@@ -172,7 +172,7 @@ def main(
         edges = neighbors.kng_to_edgelist(kng, knd)
 
     # create igraph from edge list
-    log.info("Building graph")
+    log.info(f"Building graph with {edges.shape[0]} edges")
     graph = ig.Graph(n=n_cells, edges=edges[:, :2], edge_attrs={"weight": edges[:, 2]})
 
     if high_res:

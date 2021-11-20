@@ -10,7 +10,7 @@ from numcodecs import Blosc
 log = logging.getLogger(__name__)
 
 
-@nb.njit(parallel=True)
+@nb.njit(parallel=True, fastmath=True)
 def translate_kng(node_subset: np.ndarray, kng: np.ndarray):
     """
     Subset a kNN graph to only the edges between the included nodes, filling
@@ -62,7 +62,7 @@ def write_knn_to_zarr(
     )
 
 
-@nb.njit(parallel=True)
+@nb.njit(parallel=True, fastmath=True)
 def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
     """
     Convert a knn graph and distances into an array of unique edges with weights.
@@ -87,16 +87,13 @@ def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
     return edges[edges[:, 2] > min_weight, :]
 
 
-@nb.njit
+@nb.njit(fastmath=True)
 def cosine_similarity(u: np.ndarray, v: np.ndarray):
     m = u.shape[0]
     udotv = 0
     u_norm = 0
     v_norm = 0
     for i in range(m):
-        if (np.isnan(u[i])) or (np.isnan(v[i])):
-            continue
-
         udotv += u[i] * v[i]
         u_norm += u[i] * u[i]
         v_norm += v[i] * v[i]
@@ -111,7 +108,7 @@ def cosine_similarity(u: np.ndarray, v: np.ndarray):
     return ratio
 
 
-@nb.njit(parallel=True)
+@nb.njit(parallel=True, fastmath=True)
 def cosine_edgelist(data: np.ndarray, min_weight: float = 0.0):
     """
     Compute the all-by-all cosine similarity graph directly from data.
@@ -133,7 +130,7 @@ def cosine_edgelist(data: np.ndarray, min_weight: float = 0.0):
     return edges[edges[:, 2] > min_weight, :]
 
 
-@nb.njit(parallel=True)
+@nb.njit(parallel=True, fastmath=True)
 def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
     """
     Takes the knn graph and distances from pynndescent, computes unique mutual edges
@@ -155,7 +152,7 @@ def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0
     return edges[edges[:, 2] > min_weight, :]
 
 
-@nb.njit(parallel=True)
+@nb.njit(parallel=True, fastmath=True)
 def compute_jaccard_edges(kng: np.ndarray, min_weight: float = 1 / 16):
     """
     Takes the knn graph and computes jaccard shared-nearest-neighbor edges and weights

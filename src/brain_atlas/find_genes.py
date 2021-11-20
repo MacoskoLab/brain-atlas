@@ -154,7 +154,7 @@ def hierarchical_diff_exp(
             u, p = de(data, clusters, below, above, nz_filter)
             diff_results[tuple(below), tuple(above)] = u, p, nz_diff, nz_filter
 
-    return diff_results
+    return z, diff_results
 
 
 def process_tree(

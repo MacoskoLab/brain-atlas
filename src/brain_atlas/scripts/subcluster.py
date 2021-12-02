@@ -47,7 +47,6 @@ log = logging.getLogger(__name__)
 @click.option(
     "--cutoff",
     type=float,
-    default=5.0,
     help="Stop clustering when cluster0/cluster1 is below this ratio",
 )
 @click.option("--resolution", type=str, help="Resolution to use from parent clustering")
@@ -64,7 +63,7 @@ def main(
     min_res: int = -9,
     max_res: int = -1,
     min_gene_diff: float = 0.05,
-    cutoff: float = 5.0,
+    cutoff: float = None,
     resolution: str = None,
     overwrite: bool = False,
     high_res: bool = False,
@@ -120,6 +119,8 @@ def main(
 
     n_cells = ci.sum()
     assert n_cells > 0, "No cells to process"
+    if cutoff is None:
+        cutoff = np.sqrt(n_cells)
 
     log.info(f"Processing {n_cells} / {clusters.shape[0]} cells from {tree.data}")
     d_i = ds.counts[ci, :]
@@ -153,7 +154,11 @@ def main(
     if scaled:
         d_i_mem = d_i_mem / da.std(d_i_mem, axis=0, keepdims=True)
 
-    if tree.n_pcs is not None:
+    if tree.n_pcs is None:
+        # NNDescent will convert this to a numpy array
+        knn_data = d_i_mem
+        knn_metric = "cosine"
+    else:
         # compute PCA on subset genes
         if tree.n_pcs > n_genes:
             log.error(f"Can't compute {tree.n_pcs} PCs for {n_genes} genes")
@@ -181,58 +186,59 @@ def main(
 
         knn_data = ipca
         knn_metric = "euclidean"
+
+    if knn_data.shape[0] < tree.k_neighbors ** 2 and not (tree.n_pcs or tree.jaccard):
+        # for small arrays, it is faster to compute the full pairwise distance
+        log.info("Computing all-by-all edge list")
+        edges = neighbors.cosine_edgelist(knn_data.compute())
     else:
-        # NNDescent will convert this to a numpy array
-        knn_data = d_i_mem
-        knn_metric = "cosine"
+        if valid_cache and tree.knn.exists():
+            log.info(f"Loading cached kNN from {tree.knn}")
+            kng = da.from_zarr(tree.knn, "kng").compute()
+            knd = None  # will load if needed for edge list
+        else:
+            translated_kng = None
+            if parent.knn.exists():
+                log.debug(f"loading existing kNN graph from {parent.knn}")
+                original_kng = da.from_zarr(parent.knn, "kng")
+                if original_kng.shape[0] == ci.shape[0]:
+                    translated_kng = neighbors.translate_kng(ci, original_kng.compute())
+                elif original_kng.shape[0] == (clusters > -1).sum():
+                    translated_kng = neighbors.translate_kng(
+                        ci[clusters > -1], original_kng.compute()
+                    )
+                else:
+                    log.warning(
+                        f"kNN shape {original_kng.shape} did not match clusters {ci.shape}"
+                    )
 
-    if valid_cache and tree.knn.exists():
-        log.info(f"Loading cached kNN from {tree.knn}")
-        kng = da.from_zarr(tree.knn, "kng").compute()
-        knd = None  # will load if needed for edge list
-    else:
-        translated_kng = None
-        if parent.knn.exists():
-            log.debug(f"loading existing kNN graph from {parent.knn}")
-            original_kng = da.from_zarr(str(parent.knn), "kng")
-            if original_kng.shape[0] == ci.shape[0]:
-                translated_kng = neighbors.translate_kng(ci, original_kng.compute())
-            elif original_kng.shape[0] == (clusters > -1).sum():
-                translated_kng = neighbors.translate_kng(
-                    ci[clusters > -1], original_kng.compute()
-                )
-            else:
-                log.warning(
-                    f"kNN shape {original_kng.shape} did not match clusters {ci.shape}"
-                )
+            # compute kNN, either on PCA or on counts
+            log.info("Computing kNN")
+            kng, knd = NNDescent(
+                data=knn_data,
+                n_neighbors=tree.k_neighbors + 1,
+                metric=knn_metric,
+                init_graph=translated_kng,
+            ).neighbor_graph
 
-        # compute kNN, either on PCA or on counts
-        log.info("Computing kNN")
-        kng, knd = NNDescent(
-            data=knn_data,
-            n_neighbors=tree.k_neighbors + 1,
-            metric=knn_metric,
-            init_graph=translated_kng,
-        ).neighbor_graph
+            kng = kng.astype(np.int32)
+            log.debug(f"Saving kNN to {tree.knn}")
+            neighbors.write_knn_to_zarr(kng, knd, tree.knn, overwrite=overwrite)
 
-        kng = kng.astype(np.int32)
-        log.debug(f"Saving kNN to {tree.knn}")
-        neighbors.write_knn_to_zarr(kng, knd, tree.knn, overwrite=overwrite)
+        if tree.jaccard:
+            # compute jaccard on kNN
+            log.info("Computing SNN")
+            edges = neighbors.compute_jaccard_edges(kng)
+        else:
+            if knd is None:
+                log.debug(f"Loading kNN distances from {tree.knn}")
+                knd = da.from_zarr(tree.knn, "knd").compute()
 
-    if tree.jaccard:
-        # compute jaccard on kNN
-        log.info("Computing SNN")
-        edges = neighbors.compute_jaccard_edges(kng)
-    else:
-        if knd is None:
-            log.debug(f"Loading kNN distances from {tree.knn}")
-            knd = da.from_zarr(tree.knn, "knd").compute()
-
-        log.info("Creating edge list")
-        edges = neighbors.kng_to_edgelist(kng, knd)
+            log.info("Creating edge list")
+            edges = neighbors.kng_to_edgelist(kng, knd)
 
     # create igraph from edge list
-    log.info("Building graph")
+    log.info(f"Building graph with {edges.shape[0]} edges")
     graph = ig.Graph(n=n_cells, edges=edges[:, :2], edge_attrs={"weight": edges[:, 2]})
 
     if high_res:

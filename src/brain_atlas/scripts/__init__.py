@@ -3,11 +3,10 @@ import logging
 import click
 from dask.distributed import Client
 
-from ..util import create_logger
-from .filter_mt import main as filter_mt_cmd
-from .leiden import main as leiden_cmd
-from .make_zarr import main as make_zarr_cmd
-from .subcluster import main as subcluster_cmd
+from brain_atlas.scripts.filter_mt import main as filter_mt_cmd
+from brain_atlas.scripts.make_zarr import main as make_zarr_cmd
+from brain_atlas.scripts.subcluster import main as subcluster_cmd
+from brain_atlas.util import create_logger
 
 log = logging.getLogger(__name__)
 
@@ -25,5 +24,4 @@ def cli(debug: bool = False, log_file: str = None, dask_client: str = None):
 
 cli.add_command(filter_mt_cmd, "filter_mt")
 cli.add_command(make_zarr_cmd, "make_zarr")
-cli.add_command(leiden_cmd, "leiden")
 cli.add_command(subcluster_cmd, "subcluster")

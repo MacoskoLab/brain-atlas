@@ -2,7 +2,6 @@ import logging
 from collections import Counter
 from typing import Dict, List
 
-import click
 import dask.array as da
 import igraph as ig
 import leidenalg as la
@@ -69,30 +68,3 @@ def leiden_sweep(
             )
 
     return membership_arrays, membership_counts
-
-
-@click.command("leiden-sweep")
-@click.argument("graph-zarr", type=click.Path(dir_okay=True, file_okay=False))
-@click.option("-n", "--n-cells", required=True, type=int)
-@click.option("-o", "--output-file", required=True, type=click.Path())
-@click.option("--min-res", type=int, default=-9, help="minimum resolution 10^MIN_RES")
-@click.option(
-    "--max-res", type=int, default=-5, help="maximum resolution 5 x 10^MAX_RES"
-)
-@click.option(
-    "--cutoff",
-    type=float,
-    default=None,
-    help="cluster0/cluster1 ratio cutoff to stop clustering",
-)
-def main(graph_zarr, n_cells, output_file, min_res=-9, max_res=-5, cutoff=None):
-    graph = load_graph(n_cells, graph_zarr)
-
-    res_list = [
-        float(f"{b}e{p}") for p in range(min_res, max_res + 1) for b in (1, 2, 5)
-    ]
-
-    m_arrays, _ = leiden_sweep(graph, res_list, cutoff=cutoff)
-
-    m_arrays = {f"{res}": arr for res, arr in m_arrays.items()}
-    np.savez_compressed(output_file, **m_arrays)

@@ -1,4 +1,6 @@
 import logging
+from pathlib import Path
+from typing import Union
 
 import dask.array as da
 from numcodecs import Blosc
@@ -12,13 +14,18 @@ class Dataset:
     CHUNKS = 4000
 
     def __init__(
-        self, input_zarr: str, count_array: str = COUNTS, numi_array: str = NUMIS
+        self,
+        input_zarr: Union[str, Path],
+        count_array: str = COUNTS,
+        numi_array: str = NUMIS,
     ):
         self.counts = da.from_zarr(input_zarr, count_array)
         self.numis = da.from_zarr(input_zarr, numi_array)
 
     @staticmethod
-    def save(output_zarr, count_array: da.Array, numis: da.Array = None):
+    def save(
+        output_zarr: Union[str, Path], count_array: da.Array, numis: da.Array = None
+    ):
         log.debug(f"saving to {output_zarr}")
         count_array = count_array.rechunk(Dataset.CHUNKS)
         count_array.to_zarr(

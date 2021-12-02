@@ -154,7 +154,7 @@ def hierarchical_diff_exp(
             u, p = de(data, clusters, below, above, nz_filter)
             diff_results[tuple(below), tuple(above)] = u, p, nz_diff, nz_filter
 
-    return diff_results
+    return z, diff_results
 
 
 def process_tree(
@@ -163,7 +163,7 @@ def process_tree(
     max_nz_b: float = 0.2,
     selected_only: bool = True,
 ):
-    ds = Dataset(str(tree.data))
+    ds = Dataset(tree.data)
 
     clusters = np.load(tree.clustering)
     if tree.resolution is None:

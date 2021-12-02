@@ -10,7 +10,7 @@ from brain_atlas.util.dataset import Dataset
 log = logging.getLogger(__name__)
 
 
-@click.command(name="filter_mt", no_args_is_help=True)
+@click.command(name="filter-mt", no_args_is_help=True)
 @click.argument("input-zarr", type=click.Path(dir_okay=True, file_okay=False))
 @click.argument("output-zarr", type=click.Path(dir_okay=True, file_okay=False))
 @click.option("-g", "--genes", required=True, type=click.Path(exists=True))

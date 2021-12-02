@@ -13,15 +13,15 @@ from pynndescent import NNDescent
 
 import brain_atlas.neighbors as neighbors
 from brain_atlas.gene_selection import dask_pblock
+from brain_atlas.leiden import leiden_sweep
 from brain_atlas.leiden_tree import LeidenTree
-from brain_atlas.scripts.leiden import leiden_sweep
 from brain_atlas.util.dataset import Dataset
 
 log = logging.getLogger(__name__)
 
 
 @click.command("subcluster")
-@click.argument("root_path", type=click.Path(dir_okay=True, file_okay=False))
+@click.argument("root-path", type=click.Path(dir_okay=True, file_okay=False))
 @click.argument("level", type=int, nargs=-1)
 @click.option("-n", "--n-pcs", type=int, help="Number of PCs to compute, if any")
 @click.option("-k", "--k-neighbors", type=int)
@@ -41,13 +41,12 @@ log = logging.getLogger(__name__)
 @click.option(
     "--min-gene-diff",
     type=float,
-    default=0.025,
+    default=0.05,
     help="Minimum cutoff for calling differential genes",
 )
 @click.option(
     "--cutoff",
     type=float,
-    default=5.0,
     help="Stop clustering when cluster0/cluster1 is below this ratio",
 )
 @click.option("--resolution", type=str, help="Resolution to use from parent clustering")
@@ -63,8 +62,8 @@ def main(
     jaccard: bool = None,
     min_res: int = -9,
     max_res: int = -1,
-    min_gene_diff: float = 0.025,
-    cutoff: float = 5.0,
+    min_gene_diff: float = 0.05,
+    cutoff: float = None,
     resolution: str = None,
     overwrite: bool = False,
     high_res: bool = False,
@@ -74,24 +73,31 @@ def main(
     the specified resolutions, stopping at the optional cutoff.
     """
 
-    # TODO: codepath for initial clustering
-
     root = LeidenTree.from_path(Path(root_path))
-    ds = Dataset(str(root.data))
+    ds = Dataset(root.data)
 
-    # open the tree one level up (this might be the root)
-    parent = LeidenTree.from_path(root.subcluster_path(level[:-1]))
-    clusters = np.load(parent.clustering)
-    if resolution is None:
-        if parent.resolution is None:
-            # use the largest resolution present in the file
-            resolution = max(clusters, key=float)
-        else:
-            resolution = parent.resolution
+    # check if we are clustering the root (e.g. no parent)
+    if len(level) == 0:
+        parent = root  # for cache purposes
 
-    log.debug(f"Using parent clustering with resolution {resolution}")
-    clusters: np.ndarray = clusters[resolution]
-    assert clusters.shape[0] == ds.counts.shape[0], "Clusters do not match input data"
+        log.debug("Using all-zero clustering for root")
+        clusters = np.zeros(ds.counts.shape[0], dtype=np.int32)
+        ci = np.ones_like(clusters, dtype=bool)
+    else:
+        # open the tree one level up
+        parent = LeidenTree.from_path(root.subcluster_path(level[:-1]))
+        clusters = np.load(parent.clustering)
+        if resolution is None:
+            if parent.resolution is None:
+                # use the largest resolution present in the file
+                resolution = max(clusters, key=float)
+            else:
+                resolution = parent.resolution
+
+        log.debug(f"Using parent clustering with resolution {resolution}")
+        clusters: np.ndarray = clusters[resolution]
+        ci = clusters == level[-1]
+        assert ci.shape[0] == ds.counts.shape[0], "Clusters do not match input data"
 
     tree = LeidenTree(
         root.subcluster_path(level),
@@ -111,22 +117,23 @@ def main(
     else:
         log.debug("Using cached values")
 
-    ci = clusters == level[-1]
     n_cells = ci.sum()
     assert n_cells > 0, "No cells to process"
+    if cutoff is None:
+        cutoff = np.sqrt(n_cells)
 
     log.info(f"Processing {n_cells} / {clusters.shape[0]} cells from {tree.data}")
     d_i = ds.counts[ci, :]
 
     if valid_cache and tree.selected_genes.exists():
         log.info(f"Loading cached gene selection from {tree.selected_genes}")
-        selected_genes = np.load(tree.selected_genes)["selected_genes"]
+        with np.load(tree.selected_genes) as d:
+            selected_genes = d["selected_genes"]
         n_genes = selected_genes.shape[0]
     else:
         exp_pct_nz, pct, ds_p = dask_pblock(d_i, numis=ds.numis[ci, :])
 
-        gene_cutoff = max(min_gene_diff, np.percentile(exp_pct_nz - pct, 90))
-        selected_genes = (exp_pct_nz - pct > gene_cutoff).nonzero()[0]
+        selected_genes = ((exp_pct_nz - pct > min_gene_diff) & (ds_p < -5)).nonzero()[0]
         n_genes = selected_genes.shape[0]
 
         # save output
@@ -147,7 +154,11 @@ def main(
     if scaled:
         d_i_mem = d_i_mem / da.std(d_i_mem, axis=0, keepdims=True)
 
-    if tree.n_pcs is not None:
+    if tree.n_pcs is None:
+        # NNDescent will convert this to a numpy array
+        knn_data = d_i_mem
+        knn_metric = "cosine"
+    else:
         # compute PCA on subset genes
         if tree.n_pcs > n_genes:
             log.error(f"Can't compute {tree.n_pcs} PCs for {n_genes} genes")
@@ -155,7 +166,7 @@ def main(
 
         if valid_cache and tree.pca.exists():
             log.info(f"Loading cached PCA from {tree.pca}")
-            ipca = da.from_zarr(str(tree.pca)).compute()
+            ipca = da.from_zarr(tree.pca).compute()
         else:
             log.info("Computing PCA")
             ipca = (
@@ -168,70 +179,67 @@ def main(
 
             log.debug(f"Saving PCA to {tree.pca}")
             da.array(ipca).rechunk((40000, n_pcs)).to_zarr(
-                str(tree.pca),
+                tree.pca,
                 compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
                 overwrite=overwrite,
             )
 
         knn_data = ipca
         knn_metric = "euclidean"
+
+    if knn_data.shape[0] < tree.k_neighbors ** 2 and not (tree.n_pcs or tree.jaccard):
+        # for small arrays, it is faster to compute the full pairwise distance
+        log.info("Computing all-by-all edge list")
+        edges = neighbors.cosine_edgelist(knn_data.compute())
     else:
-        # NNDescent will convert this to a numpy array
-        knn_data = d_i_mem
-        knn_metric = "cosine"
+        if valid_cache and tree.knn.exists():
+            log.info(f"Loading cached kNN from {tree.knn}")
+            kng = da.from_zarr(tree.knn, "kng").compute()
+            knd = None  # will load if needed for edge list
+        else:
+            translated_kng = None
+            if parent.knn.exists():
+                log.debug(f"loading existing kNN graph from {parent.knn}")
+                original_kng = da.from_zarr(parent.knn, "kng")
+                if original_kng.shape[0] == ci.shape[0]:
+                    translated_kng = neighbors.translate_kng(ci, original_kng.compute())
+                elif original_kng.shape[0] == (clusters > -1).sum():
+                    translated_kng = neighbors.translate_kng(
+                        ci[clusters > -1], original_kng.compute()
+                    )
+                else:
+                    log.warning(
+                        f"kNN shape {original_kng.shape} did not match clusters {ci.shape}"
+                    )
 
-    if valid_cache and tree.knn.exists():
-        log.info(f"Loading cached kNN from {tree.knn}")
-        kng = da.from_zarr(str(tree.knn), "kng").compute()
-        knd = None  # will load if needed for edge list
-    else:
-        translated_kng = None
-        if parent.knn.exists():
-            log.debug(f"loading existing kNN graph from {parent.knn}")
-            original_kng = da.from_zarr(str(parent.knn), "kng")
-            if original_kng.shape[0] == ci.shape[0]:
-                translated_kng = neighbors.translate_kng(ci, original_kng.compute())
-            elif original_kng.shape[0] == (clusters > -1).sum():
-                translated_kng = neighbors.translate_kng(
-                    ci[clusters > -1], original_kng.compute()
-                )
-            else:
-                log.warning(
-                    f"kNN shape {original_kng.shape} did not match clusters {ci.shape}"
-                )
+            # compute kNN, either on PCA or on counts
+            log.info("Computing kNN")
+            kng, knd = NNDescent(
+                data=knn_data,
+                n_neighbors=tree.k_neighbors + 1,
+                metric=knn_metric,
+                init_graph=translated_kng,
+            ).neighbor_graph
 
-        # compute kNN, either on PCA or on counts
-        log.info("Computing kNN")
-        kng, knd = NNDescent(
-            data=knn_data,
-            n_neighbors=tree.k_neighbors + 1,
-            metric=knn_metric,
-            init_graph=translated_kng,
-        ).neighbor_graph
+            kng = kng.astype(np.int32)
+            log.debug(f"Saving kNN to {tree.knn}")
+            neighbors.write_knn_to_zarr(kng, knd, tree.knn, overwrite=overwrite)
 
-        kng = kng.astype(np.int32)
-        log.debug(f"Saving kNN to {tree.knn}")
-        neighbors.write_knn_to_zarr(kng, knd, tree.knn, overwrite=overwrite)
+        if tree.jaccard:
+            # compute jaccard on kNN
+            log.info("Computing SNN")
+            edges = neighbors.compute_jaccard_edges(kng)
+        else:
+            if knd is None:
+                log.debug(f"Loading kNN distances from {tree.knn}")
+                knd = da.from_zarr(tree.knn, "knd").compute()
 
-    if tree.jaccard:
-        # compute jaccard on kNN
-        log.info("Computing SNN")
-        dists = neighbors.compute_jaccard_edges(kng)
-    else:
-        if knd is None:
-            log.debug(f"Loading kNN distances from {tree.knn}")
-            knd = da.from_zarr(str(tree.knn), "knd").compute()
-
-        # compute cosine distance for mutual neighbors
-        log.info("Creating edge list")
-        dists = neighbors.kng_to_edgelist(kng, knd)
-
-    edges = dists[:, :2]
-    weights = dists[:, 2]
+            log.info("Creating edge list")
+            edges = neighbors.kng_to_edgelist(kng, knd)
 
     # create igraph from edge list
-    log.info("Building graph")
-    graph = ig.Graph(n=n_cells, edges=edges, edge_attrs={"weight": weights})
+    log.info(f"Building graph with {edges.shape[0]} edges")
+    graph = ig.Graph(n=n_cells, edges=edges[:, :2], edge_attrs={"weight": edges[:, 2]})
 
     if high_res:
         bs = range(1, 10)

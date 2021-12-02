@@ -46,7 +46,7 @@ class LeidenTree:
 
         if transform is None or transform.lower() == "none":
             self.transform = None
-        elif transform.lower() in ("sqrt", "log1p", "pval"):
+        elif transform.lower() in ("sqrt", "log1p"):
             self.transform = transform.lower()
         else:
             raise ValueError(f"Unknown transform {transform}")

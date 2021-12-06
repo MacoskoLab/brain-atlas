@@ -1,15 +1,13 @@
 import logging
 from collections import Counter
-from typing import Sequence
+from typing import Dict, Sequence
 
-import dask
 import dask.array as da
 import numpy as np
 import scipy.cluster.hierarchy
 
+import brain_atlas.util.tree as tree
 from brain_atlas.diff_exp import mannwhitneyu
-from brain_atlas.leiden_tree import LeidenTree
-from brain_atlas.util.dataset import Dataset
 
 log = logging.getLogger(__name__)
 
@@ -91,12 +89,82 @@ def de(
     return full_u, full_p
 
 
+def leiden_tree_diff_exp(
+    data: da.array,
+    clusters: np.ndarray,
+    rd: Dict[int, tree.ClusterNode],
+    delta_nz: float = 0.2,
+    max_nz_b: float = 0.2,
+):
+    cluster_counts = Counter(clusters[clusters > -1])
+    n_nodes = len(rd)
+    assert set(cluster_counts).issubset(rd)
+
+    cluster_nz = np.zeros((n_nodes, data.shape[1]))
+    for i in range(n_nodes):
+        cluster_i = clusters == i
+        if cluster_i.any():
+            cluster_nz[i, :] = da.sign(data[cluster_i, :]).sum(0).compute()
+
+    cluster_counts = np.array([cluster_counts[i] for i in range(n_nodes)])
+    rd_set = set(rd)
+
+    sibling_results = {}
+    subtree_results = {}
+
+    for i in range(n_nodes):
+        if not rd[i].is_leaf:
+            c_lists = {n.node_id: n.pre_order(True) for n in rd[i].children}
+
+            for n in rd[i].children:
+                j = n.node_id
+                c_j = c_lists[j]
+                c_other = [c_o for k in c_lists if j != k for c_o in c_lists[k]]
+
+                # don't calculate if it's redundant with a 1-vs-all comp
+                if i == n_nodes - 1 and (len(c_j) == 1 or len(c_other) == 1):
+                    continue
+
+                # log.debug(f"Comparing {c_this} with {c_other}")
+                nz_diff, nz_filter = calc_filter(
+                    cluster_counts, cluster_nz, c_j, c_other, max_nz_b, delta_nz
+                )
+
+                _, p = de(data, clusters, c_j, c_other, nz_filter)
+                sibling_results[j] = p, nz_diff, nz_filter
+
+                # special case for 2 siblings: results are symmetrical
+                if len(rd[i].children) == 2:
+                    k = rd[i].children[1].node_id
+                    sibling_results[k] = p, -nz_diff, nz_filter
+                    break
+
+        if i != n_nodes - 1:
+            below = rd[i].pre_order(True)
+            below_set = set(below)
+            above = sorted(rd_set - below_set)
+
+            # don't calculate redundant comparison
+            if len(above) == 1:
+                continue
+
+            # log.debug(f"Comparing {below} with {above}")
+            nz_diff, nz_filter = calc_filter(
+                cluster_counts, cluster_nz, below, above, max_nz_b, delta_nz
+            )
+
+            _, p = de(data, clusters, below, above, nz_filter)
+            subtree_results[i] = p, nz_diff, nz_filter
+
+    return sibling_results, subtree_results
+
+
 def hierarchical_diff_exp(
     data, clusters: np.ndarray, delta_nz: float = 0.2, max_nz_b: float = 0.2
 ):
     cluster_counts = Counter(clusters[clusters > -1])
     n_clusters = len(cluster_counts)
-    assert sorted(range(n_clusters)) == sorted(cluster_counts)
+    assert list(range(n_clusters)) == sorted(cluster_counts)
 
     cluster_sums = {}
     cluster_nz = {}
@@ -110,21 +178,20 @@ def hierarchical_diff_exp(
     cluster_counts = np.array([cluster_counts[i] for i in range(n_clusters)])
 
     z = scipy.cluster.hierarchy.linkage(
-        cluster_sums / cluster_counts[:, None],
-        method="average",
-        metric="cosine",
+        cluster_sums / cluster_counts[:, None], method="average", metric="cosine"
     )
     root, rd = scipy.cluster.hierarchy.to_tree(z, rd=True)
 
-    diff_results = {}
+    sib_results = {}
+    sub_results = {}
 
     for i in range(0, 2 * n_clusters - 1):
         if i >= n_clusters:
             left_child = rd[i].get_left()
-            left = left_child.pre_order(lambda x: x.id)
+            left = left_child.pre_order()
 
             right_child = rd[i].get_right()
-            right = right_child.pre_order(lambda x: x.id)
+            right = right_child.pre_order()
 
             # don't calculate if it's redundant with a 1-vs-all comp
             if i == 2 * n_clusters - 2 and (len(left) == 1 or len(right) == 1):
@@ -135,11 +202,11 @@ def hierarchical_diff_exp(
                 cluster_counts, cluster_nz, left, right, max_nz_b, delta_nz
             )
 
-            u, p = de(data, clusters, left, right, nz_filter)
-            diff_results[tuple(left), tuple(right)] = u, p, nz_diff, nz_filter
+            _, p = de(data, clusters, left, right, nz_filter)
+            sib_results[i] = p, nz_diff, nz_filter
 
         if i < 2 * n_clusters - 2:
-            below = rd[i].pre_order(lambda x: x.id)
+            below = rd[i].pre_order()
             above = [j for j in range(n_clusters) if j not in below]
 
             # don't calculate redundant comparison
@@ -151,47 +218,7 @@ def hierarchical_diff_exp(
                 cluster_counts, cluster_nz, below, above, max_nz_b, delta_nz
             )
 
-            u, p = de(data, clusters, below, above, nz_filter)
-            diff_results[tuple(below), tuple(above)] = u, p, nz_diff, nz_filter
+            _, p = de(data, clusters, below, above, nz_filter)
+            sub_results[i] = p, nz_diff, nz_filter
 
-    return z, diff_results
-
-
-def process_tree(
-    tree: LeidenTree,
-    delta_nz: float = 0.2,
-    max_nz_b: float = 0.2,
-    selected_only: bool = True,
-):
-    ds = Dataset(tree.data)
-
-    clusters = np.load(tree.clustering)
-    if tree.resolution is None:
-        resolution = max(clusters, key=float)
-    else:
-        resolution = tree.resolution
-
-    log.debug(f"Using clustering with resolution {resolution}")
-    clusters = clusters[resolution]
-    assert clusters.shape[0] == ds.counts.shape[0], "Clusters do not match input data"
-
-    ci = clusters > -1
-    n_cells = ci.sum()
-    ci_clusters = clusters[ci]
-
-    log.info(f"Processing {n_cells} / {clusters.shape[0]} cells from {tree.data}")
-    d_i = ds.counts[ci, :]
-
-    if selected_only:
-        log.debug(f"Loading selected genes from {tree.selected_genes}")
-        selected_genes = np.load(tree.selected_genes)["selected_genes"]
-        n_genes = selected_genes.shape[0]
-
-        # subselect genes
-        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-            d_i_mem = d_i[:, selected_genes].rechunk({1: n_genes}).persist()
-    else:
-        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-            d_i_mem = d_i.persist()
-
-    return hierarchical_diff_exp(d_i_mem, ci_clusters, delta_nz, max_nz_b)
+    return z, sib_results, sub_results

@@ -1,6 +1,6 @@
 import logging
 from collections import Counter
-from typing import Dict, Sequence
+from typing import Dict, Sequence, Union
 
 import dask.array as da
 import numpy as np
@@ -62,7 +62,7 @@ def calc_filter(
 
 
 def de(
-    ds: da.array,
+    ds: Union[np.ndarray, da.Array],
     clusters: np.ndarray,
     group1: Sequence[int],
     group2: Sequence[int],
@@ -78,8 +78,10 @@ def de(
     full_p = np.zeros(ds.shape[1])  # logp, no result = 0
 
     if np.any(gene_filter):
-        ds_a = ds[c_a, :].compute()
-        ds_b = ds[c_b, :].compute()
+        ds_a = ds[c_a, :]
+        ds_b = ds[c_b, :]
+        if isinstance(ds, da.Array):
+            ds_a, ds_b = da.compute(ds_a, ds_b)
 
         u, logp = mannwhitneyu(ds_a[:, gene_filter], ds_b[:, gene_filter])
 

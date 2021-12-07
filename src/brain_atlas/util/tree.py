@@ -43,6 +43,7 @@ class ClusterNode:
                 if ndid not in visited:
                     if include_internal:
                         preorder.append(func(nd))
+                    # reversing the list because they will be visited backwards
                     for i, nd_c in enumerate(nd.children[::-1]):
                         cur_node[k + i + 1] = nd_c
                     visited.add(ndid)

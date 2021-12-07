@@ -127,7 +127,7 @@ def leiden_tree_diff_exp(
                 if i == n_nodes - 1 and (len(c_j) == 1 or len(c_other) == 1):
                     continue
 
-                # log.debug(f"Comparing {c_this} with {c_other}")
+                log.debug(f"Comparing {c_j} with {c_other}")
                 nz_diff, nz_filter = calc_filter(
                     cluster_counts, cluster_nz, c_j, c_other, max_nz_b, delta_nz
                 )
@@ -135,7 +135,7 @@ def leiden_tree_diff_exp(
                 _, p = de(data, clusters, c_j, c_other, nz_filter)
                 sibling_results[j] = p, nz_diff, nz_filter
 
-                # special case for 2 siblings: results are symmetrical
+                # special (common) case for 2 siblings: results are symmetrical
                 if len(rd[i].children) == 2:
                     k = rd[i].children[1].node_id
                     sibling_results[k] = p, -nz_diff, nz_filter
@@ -150,7 +150,7 @@ def leiden_tree_diff_exp(
             if len(above) == 1:
                 continue
 
-            # log.debug(f"Comparing {below} with {above}")
+            log.debug(f"Comparing {below} with {above}")
             nz_diff, nz_filter = calc_filter(
                 cluster_counts, cluster_nz, below, above, max_nz_b, delta_nz
             )
@@ -182,10 +182,10 @@ def hierarchical_diff_exp(
     z = scipy.cluster.hierarchy.linkage(
         cluster_sums / cluster_counts[:, None], method="average", metric="cosine"
     )
-    root, rd = scipy.cluster.hierarchy.to_tree(z, rd=True)
+    _, rd = scipy.cluster.hierarchy.to_tree(z, rd=True)
 
-    sib_results = {}
-    sub_results = {}
+    sibling_results = {}
+    subtree_results = {}
 
     for i in range(0, 2 * n_clusters - 1):
         if i >= n_clusters:
@@ -205,7 +205,7 @@ def hierarchical_diff_exp(
             )
 
             _, p = de(data, clusters, left, right, nz_filter)
-            sib_results[i] = p, nz_diff, nz_filter
+            sibling_results[i] = p, nz_diff, nz_filter
 
         if i < 2 * n_clusters - 2:
             below = rd[i].pre_order()
@@ -221,6 +221,6 @@ def hierarchical_diff_exp(
             )
 
             _, p = de(data, clusters, below, above, nz_filter)
-            sub_results[i] = p, nz_diff, nz_filter
+            subtree_results[i] = p, nz_diff, nz_filter
 
-    return z, sib_results, sub_results
+    return z, sibling_results, subtree_results

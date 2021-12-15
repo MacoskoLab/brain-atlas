@@ -204,7 +204,7 @@ def main(
         knn_data = ipca
         knn_metric = "euclidean"
 
-    if knn_data.shape[0] < tree.k_neighbors ** 2 and not tree.n_pcs:
+    if knn_data.shape[0] < 1000 * tree.k_neighbors and not tree.n_pcs:
         # for small arrays, it is faster to compute the full pairwise distance
         log.info("Computing edge list via brute-force algo")
         if tree.jaccard:

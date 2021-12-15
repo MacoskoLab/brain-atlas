@@ -172,7 +172,7 @@ def k_cosine_edgelist(data: np.ndarray, k: int, min_weight: float = 0.0):
 
 
 @nb.njit(parallel=True, fastmath=True)
-def k_jaccard_edgelist(data: np.ndarray, k: int, min_weight: float = 1 / 16):
+def k_jaccard_edgelist(data: np.ndarray, k: int, min_weight: float = 0.0):
     """
     Creates a Jaccard edgelist by calculating all-by-all similarities first.
     For smaller n, this is faster than using the NNDescent algorithm,
@@ -184,8 +184,7 @@ def k_jaccard_edgelist(data: np.ndarray, k: int, min_weight: float = 1 / 16):
     kng = np.zeros((n, k), dtype=np.int32)
 
     for i in nb.prange(n):
-        edge_i = np.argsort(dist[i, :])[: -(k + 1) : -1]
-        kng[i, :] = edge_i
+        kng[i, :] = np.argsort(dist[i, :])[: -(k + 1) : -1]
 
     return kng_to_jaccard(kng, min_weight)
 
@@ -213,7 +212,7 @@ def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0
 
 
 @nb.njit(parallel=True, fastmath=True)
-def kng_to_jaccard(kng: np.ndarray, min_weight: float = 1 / 16):
+def kng_to_jaccard(kng: np.ndarray, min_weight: float = 0.0):
     """
     Takes the knn graph and computes jaccard shared-nearest-neighbor edges and weights.
     Removes self-edges

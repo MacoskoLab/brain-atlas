@@ -31,10 +31,17 @@ log = logging.getLogger(__name__)
     type=click.Choice(["none", "sqrt", "log1p"], case_sensitive=False),
 )
 @click.option(
-    "-z/-Z", "--std/--no-std", "scaled", help="Standardize genes before PCA/kNN"
+    "-z/-Z",
+    "--std/--no-std",
+    "scaled",
+    help="Standardize genes before PCA/kNN",
+    default=None,
 )
 @click.option(
-    "--snn/--no-snn", "jaccard", help="Compute shared nearest neighbors graph"
+    "--snn/--no-snn",
+    "jaccard",
+    help="Compute shared nearest neighbors graph",
+    default=None,
 )
 @click.option("--min-res", type=int, default=-9, help="Minimum resolution 10^MIN_RES")
 @click.option("--max-res", type=int, default=-1, help="Maximum resolution 5x10^MAX_RES")
@@ -52,6 +59,12 @@ log = logging.getLogger(__name__)
 @click.option("--resolution", type=str, help="Resolution to use from parent clustering")
 @click.option("--overwrite", is_flag=True, help="Don't use any cached results")
 @click.option("--high-res", is_flag=True, help="Use a more granular resolution sweep")
+@click.option(
+    "-o",
+    "--output-dir",
+    type=click.Path(dir_okay=True, file_okay=False),
+    help="Alternate directory for output",
+)
 def main(
     root_path: str,
     level: Sequence[int],
@@ -67,6 +80,7 @@ def main(
     resolution: str = None,
     overwrite: bool = False,
     high_res: bool = False,
+    output_dir: str = None,
 ):
     """
     Subclusters LEVEL of the ROOT_PATH Leiden tree, performing a sweep across
@@ -99,8 +113,11 @@ def main(
         ci = clusters == level[-1]
         assert ci.shape[0] == ds.counts.shape[0], "Clusters do not match input data"
 
+    if output_dir is None:
+        output_dir = root.subcluster_path(level)
+
     tree = LeidenTree(
-        root.subcluster_path(level),
+        output_dir,
         data=root.data,
         n_pcs=n_pcs or root.n_pcs,
         k_neighbors=k_neighbors or root.k_neighbors,

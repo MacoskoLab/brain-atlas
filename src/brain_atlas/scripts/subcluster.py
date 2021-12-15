@@ -270,6 +270,10 @@ def main(
     if valid_cache and tree.clustering.exists():
         with np.load(tree.clustering) as data:
             cached_arrays = {float(k): d[d > -1] for k, d in data.items()}
+
+        if not all(v.shape[0] == n_cells for v in cached_arrays.values()):
+            log.warning("cached arrays are the wrong size")
+            cached_arrays = None
     else:
         cached_arrays = None
 

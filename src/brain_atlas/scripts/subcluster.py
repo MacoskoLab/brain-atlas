@@ -204,10 +204,14 @@ def main(
         knn_data = ipca
         knn_metric = "euclidean"
 
-    if knn_data.shape[0] < tree.k_neighbors ** 2 and not (tree.n_pcs or tree.jaccard):
+    if knn_data.shape[0] < tree.k_neighbors ** 2 and not tree.n_pcs:
         # for small arrays, it is faster to compute the full pairwise distance
-        log.info("Computing all-by-all edge list")
-        edges = neighbors.cosine_edgelist(knn_data.compute())
+        log.info("Computing edge list via brute-force algo")
+        if tree.jaccard:
+            log.debug("calculating jaccard scores")
+            edges = neighbors.k_jaccard_edgelist(knn_data.compute(), k=k_neighbors)
+        else:
+            edges = neighbors.k_cosine_edgelist(knn_data.compute(), k=k_neighbors)
     else:
         if valid_cache and tree.knn.exists():
             log.info(f"Loading cached kNN from {tree.knn}")
@@ -230,7 +234,7 @@ def main(
                     )
 
             # compute kNN, either on PCA or on counts
-            log.info("Computing kNN")
+            log.info("Computing kNN via pynndescent")
             kng, knd = NNDescent(
                 data=knn_data,
                 n_neighbors=tree.k_neighbors + 1,
@@ -245,14 +249,14 @@ def main(
         if tree.jaccard:
             # compute jaccard on kNN
             log.info("Computing SNN")
-            edges = neighbors.compute_jaccard_edges(kng)
+            edges = neighbors.kng_to_jaccard(kng)
         else:
             if knd is None:
                 log.debug(f"Loading kNN distances from {tree.knn}")
                 knd = da.from_zarr(tree.knn, "knd").compute()
 
             log.info("Creating edge list")
-            edges = neighbors.kng_to_edgelist(kng, knd)
+            edges = neighbors.kng_to_edgelist(kng, 1 - knd)
 
     # create igraph from edge list
     log.info(f"Building graph with {edges.shape[0]} edges")

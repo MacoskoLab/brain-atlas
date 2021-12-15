@@ -66,7 +66,7 @@ def write_knn_to_zarr(
 def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
     """
     Convert a knn graph and distances into an array of unique edges with weights.
-    Removes self-edges
+    Removes self-edges. Note: does *not* convert distances to similarity scores
     """
     n, m = kng.shape
     edges = np.vstack((np.repeat(np.arange(n), m), kng.flatten(), np.zeros(n * m))).T
@@ -75,14 +75,14 @@ def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
         for jj, j in enumerate(kng[i, :]):
             if i < j:
                 # this edge is fine
-                edges[i * m + jj, 2] = 1 - knd[i, jj]
+                edges[i * m + jj, 2] = knd[i, jj]
             elif i > j:
                 for k in kng[j, :]:
                     if i == k:
                         # this is already included on the other end
                         break
                 else:
-                    edges[i * m + jj, 2] = 1 - knd[i, jj]
+                    edges[i * m + jj, 2] = knd[i, jj]
 
     return edges[edges[:, 2] > min_weight, :]
 
@@ -109,6 +109,23 @@ def cosine_similarity(u: np.ndarray, v: np.ndarray):
 
 
 @nb.njit(parallel=True, fastmath=True)
+def full_cosine_similarity(data: np.ndarray):
+    """
+    Computes all-by-all cosine similarities and returns the dense array
+    """
+    n = data.shape[0]
+    dist = np.zeros((n, n), dtype=np.float64)
+
+    # computing similarity here so higher -> better
+    for i in nb.prange(n - 1):
+        for j in range(i + 1, n):
+            dist[i, j] = cosine_similarity(data[i, :], data[j, :])
+            dist[j, i] = dist[i, j]
+
+    return dist
+
+
+@nb.njit(parallel=True, fastmath=True)
 def cosine_edgelist(data: np.ndarray, min_weight: float = 0.0):
     """
     Compute the all-by-all cosine similarity graph directly from data.
@@ -116,6 +133,8 @@ def cosine_edgelist(data: np.ndarray, min_weight: float = 0.0):
     This is faster than the approximate method, for smaller arrays
     """
     n = data.shape[0]
+    dist = full_cosine_similarity(data)
+
     nc2 = n * (n - 1) // 2
     edges = np.empty((nc2, 3), dtype=np.float64)
 
@@ -125,9 +144,50 @@ def cosine_edgelist(data: np.ndarray, min_weight: float = 0.0):
             ix = nc2 - nic2 + (j - i - 1)
             edges[ix, 0] = i
             edges[ix, 1] = j
-            edges[ix, 2] = cosine_similarity(data[i, :], data[j, :])
+            edges[ix, 2] = dist[i, j]
 
     return edges[edges[:, 2] > min_weight, :]
+
+
+@nb.njit(parallel=True, fastmath=True)
+def k_cosine_edgelist(data: np.ndarray, k: int, min_weight: float = 0.0):
+    """
+    Creates a kNN edgelist by calculating all-by-all similarities first.
+    For smaller n, this is faster than using the NNDescent algorithm,
+    at the expense of temporarily higher memory usage
+    """
+    n = data.shape[0]
+    dist = full_cosine_similarity(data)
+
+    kng = np.zeros((n, k), dtype=np.int32)
+    knd = np.zeros((n, k), dtype=np.float64)
+
+    for i in nb.prange(n):
+        edge_i = np.argsort(dist[i, :])[: -(k + 1) : -1]
+        kng[i, :] = edge_i
+        for jj, j in enumerate(edge_i):
+            knd[i, jj] = dist[i, j]
+
+    return kng_to_edgelist(kng, knd, min_weight)
+
+
+@nb.njit(parallel=True, fastmath=True)
+def k_jaccard_edgelist(data: np.ndarray, k: int, min_weight: float = 1 / 16):
+    """
+    Creates a Jaccard edgelist by calculating all-by-all similarities first.
+    For smaller n, this is faster than using the NNDescent algorithm,
+    at the expense of temporarily higher memory usage
+    """
+    n = data.shape[0]
+    dist = full_cosine_similarity(data)
+
+    kng = np.zeros((n, k), dtype=np.int32)
+
+    for i in nb.prange(n):
+        edge_i = np.argsort(dist[i, :])[: -(k + 1) : -1]
+        kng[i, :] = edge_i
+
+    return kng_to_jaccard(kng, min_weight)
 
 
 @nb.njit(parallel=True, fastmath=True)
@@ -153,9 +213,10 @@ def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0
 
 
 @nb.njit(parallel=True, fastmath=True)
-def compute_jaccard_edges(kng: np.ndarray, min_weight: float = 1 / 16):
+def kng_to_jaccard(kng: np.ndarray, min_weight: float = 1 / 16):
     """
-    Takes the knn graph and computes jaccard shared-nearest-neighbor edges and weights
+    Takes the knn graph and computes jaccard shared-nearest-neighbor edges and weights.
+    Removes self-edges
     """
     n, m = kng.shape
     edges = np.vstack((np.repeat(np.arange(n), m), kng.flatten(), np.zeros(n * m))).T

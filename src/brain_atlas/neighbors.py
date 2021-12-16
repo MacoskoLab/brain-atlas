@@ -114,7 +114,7 @@ def full_cosine_similarity(data: np.ndarray):
     Computes all-by-all cosine similarities and returns the dense array
     """
     n = data.shape[0]
-    dist = np.zeros((n, n), dtype=np.float64)
+    dist = np.eye(n, dtype=np.float64)
 
     # computing similarity here so higher -> better
     for i in nb.prange(n - 1):

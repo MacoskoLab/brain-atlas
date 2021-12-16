@@ -209,9 +209,9 @@ def main(
         log.info("Computing edge list via brute-force algo")
         if tree.jaccard:
             log.debug("calculating jaccard scores")
-            edges = neighbors.k_jaccard_edgelist(knn_data.compute(), k=k_neighbors)
+            edges = neighbors.k_jaccard_edgelist(knn_data.compute(), k=k_neighbors + 1)
         else:
-            edges = neighbors.k_cosine_edgelist(knn_data.compute(), k=k_neighbors)
+            edges = neighbors.k_cosine_edgelist(knn_data.compute(), k=k_neighbors + 1)
     else:
         if valid_cache and tree.knn.exists():
             log.info(f"Loading cached kNN from {tree.knn}")

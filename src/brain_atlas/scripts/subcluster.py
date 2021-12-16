@@ -65,6 +65,12 @@ log = logging.getLogger(__name__)
     type=click.Path(dir_okay=True, file_okay=False),
     help="Alternate directory for output",
 )
+@click.option(
+    "--max-array-size",
+    type=int,
+    default=25000,
+    help="Threshold for switching from brute-force algo to NNDescent",
+)
 def main(
     root_path: str,
     level: Sequence[int],
@@ -81,6 +87,7 @@ def main(
     overwrite: bool = False,
     high_res: bool = False,
     output_dir: str = None,
+    max_array_size: int = 25000,
 ):
     """
     Subclusters LEVEL of the ROOT_PATH Leiden tree, performing a sweep across
@@ -204,7 +211,7 @@ def main(
         knn_data = ipca
         knn_metric = "euclidean"
 
-    if knn_data.shape[0] < 1000 * tree.k_neighbors and not tree.n_pcs:
+    if knn_data.shape[0] < max_array_size and not tree.n_pcs:
         # for small arrays, it is faster to compute the full pairwise distance
         log.info("Computing edge list via brute-force algo")
         if tree.jaccard:

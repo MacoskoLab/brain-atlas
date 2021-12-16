@@ -1,6 +1,6 @@
 import logging
 from collections import Counter
-from typing import Dict, Sequence, Union
+from typing import Dict, Sequence, Tuple, Union
 
 import dask.array as da
 import numpy as np
@@ -94,13 +94,22 @@ def de(
 def leiden_tree_diff_exp(
     data: da.array,
     clusters: np.ndarray,
-    rd: Dict[int, tree.ClusterNode],
+    node_list: Sequence[Tuple[int]],
+    node_tree: Dict[Tuple[int], tree.ClusterNode],
+    sibling_results: Dict[Tuple[int], Tuple[np.ndarray]] = None,
+    subtree_results: Dict[Tuple[int], Tuple[np.ndarray]] = None,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
 ):
     cluster_counts = Counter(clusters[clusters > -1])
-    n_nodes = len(rd)
-    assert set(cluster_counts).issubset(rd)
+    n_nodes = len(node_tree)
+    ni_set = set(range(n_nodes))
+    assert set(cluster_counts).issubset(ni_set)
+
+    k2i = {k: i for i, k in enumerate(node_list)}
+
+    def nd2i(nd):
+        return k2i[nd.node_id]
 
     cluster_nz = np.zeros((n_nodes, data.shape[1]))
     for i in range(n_nodes):
@@ -109,42 +118,50 @@ def leiden_tree_diff_exp(
             cluster_nz[i, :] = da.sign(data[cluster_i, :]).sum(0).compute()
 
     cluster_counts = np.array([cluster_counts[i] for i in range(n_nodes)])
-    rd_set = set(rd)
 
-    sibling_results = {}
-    subtree_results = {}
+    if sibling_results is None:
+        sibling_results = dict()
+    if subtree_results is None:
+        subtree_results = dict()
 
-    for i in range(n_nodes):
-        if not rd[i].is_leaf:
-            c_lists = {n.node_id: n.pre_order(True) for n in rd[i].children}
+    for k in node_list:
+        if not node_tree[k].is_leaf:
+            c_lists = {
+                nd.node_id: nd.pre_order(True, nd2i) for nd in node_tree[k].children
+            }
 
-            for n in rd[i].children:
-                j = n.node_id
-                c_j = c_lists[j]
-                c_other = [c_o for k in c_lists if j != k for c_o in c_lists[k]]
-
-                # don't calculate if it's redundant with a 1-vs-all comp
-                if i == n_nodes - 1 and (len(c_j) == 1 or len(c_other) == 1):
+            for n in node_tree[k].children:
+                i = n.node_id
+                if i in sibling_results:
                     continue
 
-                log.debug(f"Comparing {c_j} with {c_other}")
+                c_i = c_lists[i]
+                c_j = [c_o for j in c_lists if i != j for c_o in c_lists[j]]
+
+                # don't calculate if it's redundant with a 1-vs-all comp
+                if k == () and (len(c_i) == 1 or len(c_j) == 1):
+                    continue
+
+                log.debug(f"Comparing {c_i} with {c_j}")
                 nz_diff, nz_filter = calc_filter(
-                    cluster_counts, cluster_nz, c_j, c_other, max_nz_b, delta_nz
+                    cluster_counts, cluster_nz, c_i, c_j, max_nz_b, delta_nz
                 )
 
-                _, p = de(data, clusters, c_j, c_other, nz_filter)
-                sibling_results[j] = p, nz_diff, nz_filter
+                _, p = de(data, clusters, c_i, c_j, nz_filter)
+                sibling_results[i] = p, nz_diff, nz_filter
 
-                # special (common) case for 2 siblings: results are symmetrical
-                if len(rd[i].children) == 2:
-                    k = rd[i].children[1].node_id
-                    sibling_results[k] = p, -nz_diff, nz_filter
+                # common special case is 2 siblings: results are symmetrical
+                if len(node_tree[k].children) == 2:
+                    j = node_tree[k].children[1].node_id
+                    sibling_results[j] = p, -nz_diff, nz_filter
                     break
 
-        if i != n_nodes - 1:
-            below = rd[i].pre_order(True)
-            below_set = set(below)
-            above = sorted(rd_set - below_set)
+        if k != ():
+            if k in subtree_results:
+                continue
+
+            below = node_tree[k].pre_order(True, nd2i)
+            above = sorted(ni_set - set(below))
 
             # don't calculate redundant comparison
             if len(above) == 1:
@@ -156,7 +173,7 @@ def leiden_tree_diff_exp(
             )
 
             _, p = de(data, clusters, below, above, nz_filter)
-            subtree_results[i] = p, nz_diff, nz_filter
+            subtree_results[k] = p, nz_diff, nz_filter
 
     return sibling_results, subtree_results
 

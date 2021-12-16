@@ -5,14 +5,8 @@ from typing import List, Optional, Tuple
 
 class ClusterNode:
     def __init__(
-        self, node_id: int, children: List[ClusterNode] = None, count: int = 1
+        self, node_id: Tuple[int], children: List[ClusterNode] = None, count: int = 1
     ):
-        if node_id < 0:
-            raise ValueError("The id must be non-negative.")
-        if count < 1:
-            raise ValueError(
-                "A cluster must contain at least one original observation."
-            )
         self.node_id = node_id
         self.children = children
         if self.children is None:
@@ -66,31 +60,29 @@ def to_tree(leaf_list: List[Tuple[int]]):
     # this sorts the nodes to be in bottom-up order
     node_list.extend(sorted(all_nodes, key=lambda k: (-len(k), k)))
 
-    k2i = {k: i for i, k in enumerate(node_list)}
-
     # initialize node objects
-    for i in range(len(node_list)):
+    for i, k in enumerate(node_list):
         if i >= n:
-            node_dict[i] = ClusterNode(i, children=[])
+            node_dict[k] = ClusterNode(k, children=[])
         else:
-            node_dict[i] = ClusterNode(i)
+            node_dict[k] = ClusterNode(k)
 
     # add up counts and depth, from bottom
-    for i, node in enumerate(node_list):
-        if len(node):
-            node_dict[k2i[node[:-1]]].children.append(node_dict[i])
-            node_dict[k2i[node[:-1]]].count += node_dict[i].count
+    for k in node_list:
+        if len(k):
+            node_dict[k[:-1]].children.append(node_dict[k])
+            node_dict[k[:-1]].count += node_dict[k].count
 
-        if node_dict[i].is_leaf:
-            node_depth[i] = 0
+        if node_dict[k].is_leaf:
+            node_depth[k] = 0
         else:
-            node_depth[i] = (
-                max(node_depth[n.node_id] for n in node_dict[i].children) + 1
+            node_depth[k] = (
+                max(node_depth[nd.node_id] for nd in node_dict[k].children) + 1
             )
 
     # sort the children by node id
-    for i in node_dict:
-        if not node_dict[i].is_leaf:
-            node_dict[i].children.sort(key=lambda nd: nd.node_id)
+    for k in node_dict:
+        if not node_dict[k].is_leaf:
+            node_dict[k].children.sort(key=lambda nd: nd.node_id)
 
     return node_list, node_depth, node_dict

@@ -4,7 +4,6 @@ from typing import Dict, Sequence, Tuple, Union
 
 import dask.array as da
 import numpy as np
-import scipy.cluster.hierarchy
 
 import brain_atlas.util.tree as tree
 from brain_atlas.diff_exp import mannwhitneyu
@@ -61,12 +60,50 @@ def calc_filter(
     return nz_diff, nz_filter
 
 
+def calc_subsample(n_samples: int, subsample: int):
+    if n_samples <= subsample:
+        return np.arange(n_samples)
+    else:
+        return np.random.choice(n_samples, size=subsample, replace=False)
+
+
+def cluster_nz_dict(
+    data: da.Array,
+    clusters: np.ndarray,
+    node_list: Sequence[Tuple[int]],
+    cluster_nz_d: Dict[Tuple[int], np.ndarray] = None,
+):
+    """
+    Calculates the number of nonzero elements per cluster. If given, an existing
+    dictionary of arrays can be updated, under the assumption that the rest of the tree
+    is unchanged.
+    """
+    if cluster_nz_d is None:
+        cluster_nz_d = dict()
+
+    k2i = {k: i for i, k in enumerate(node_list)}
+
+    # first need to remove parents to update their nz array as well
+    for k in node_list:
+        if len(k) and k not in cluster_nz_d and k[:-1] in cluster_nz_d:
+            cluster_nz_d.pop(k[:-1])
+
+    for k in node_list:
+        if k not in cluster_nz_d:
+            cluster_i = clusters == k2i[k]
+            if cluster_i.any():
+                cluster_nz_d[k] = da.sign(data[cluster_i, :]).sum(0).compute()
+
+    return cluster_nz_d
+
+
 def de(
     ds: Union[np.ndarray, da.Array],
     clusters: np.ndarray,
     group1: Sequence[int],
     group2: Sequence[int],
     gene_filter: np.ndarray,
+    subsample: int = None,
 ):
     group1 = np.asarray(group1)
     group2 = np.asarray(group2)
@@ -80,6 +117,10 @@ def de(
     if np.any(gene_filter):
         ds_a = ds[c_a, :]
         ds_b = ds[c_b, :]
+        if subsample is not None:
+            ds_a = ds_a[calc_subsample(ds_a.shape[0], subsample), :]
+            ds_b = ds_b[calc_subsample(ds_b.shape[0], subsample), :]
+
         if isinstance(ds, da.Array):
             ds_a, ds_b = da.compute(ds_a, ds_b)
 
@@ -95,11 +136,13 @@ def leiden_tree_diff_exp(
     data: da.array,
     clusters: np.ndarray,
     node_list: Sequence[Tuple[int]],
-    node_tree: Dict[Tuple[int], tree.ClusterNode],
+    node_tree: Dict[Tuple[int], tree.MultiNode],
+    cluster_nz_d: Dict[Tuple[int], np.ndarray] = None,
     sibling_results: Dict[Tuple[int], Tuple[np.ndarray]] = None,
     subtree_results: Dict[Tuple[int], Tuple[np.ndarray]] = None,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
+    subsample: int = None,
 ):
     cluster_counts = Counter(clusters[clusters > -1])
     n_nodes = len(node_tree)
@@ -111,11 +154,15 @@ def leiden_tree_diff_exp(
     def nd2i(nd):
         return k2i[nd.node_id]
 
+    if cluster_nz_d is None:
+        cluster_nz_d = cluster_nz_dict(data, clusters, node_list)
+
+    assert all(node_list[i] in cluster_nz_d for i in cluster_counts)
+
     cluster_nz = np.zeros((n_nodes, data.shape[1]))
-    for i in range(n_nodes):
-        cluster_i = clusters == i
-        if cluster_i.any():
-            cluster_nz[i, :] = da.sign(data[cluster_i, :]).sum(0).compute()
+    for i, k in enumerate(node_list):
+        if k in cluster_nz_d:
+            cluster_nz[i, :] = cluster_nz_d[k]
 
     cluster_counts = np.array([cluster_counts[i] for i in range(n_nodes)])
 
@@ -123,6 +170,9 @@ def leiden_tree_diff_exp(
         sibling_results = dict()
     if subtree_results is None:
         subtree_results = dict()
+
+    n_sib = len(sibling_results)
+    n_sub = len(subtree_results)
 
     for k in node_list:
         if not node_tree[k].is_leaf:
@@ -147,7 +197,7 @@ def leiden_tree_diff_exp(
                     cluster_counts, cluster_nz, c_i, c_j, max_nz_b, delta_nz
                 )
 
-                _, p = de(data, clusters, c_i, c_j, nz_filter)
+                _, p = de(data, clusters, c_i, c_j, nz_filter, subsample)
                 sibling_results[i] = p, nz_diff, nz_filter
 
                 # common special case is 2 siblings: results are symmetrical
@@ -172,72 +222,12 @@ def leiden_tree_diff_exp(
                 cluster_counts, cluster_nz, below, above, max_nz_b, delta_nz
             )
 
-            _, p = de(data, clusters, below, above, nz_filter)
+            _, p = de(data, clusters, below, above, nz_filter, subsample)
             subtree_results[k] = p, nz_diff, nz_filter
 
-    return sibling_results, subtree_results
-
-
-def hierarchical_diff_exp(
-    data, clusters: np.ndarray, delta_nz: float = 0.2, max_nz_b: float = 0.2
-):
-    cluster_counts = Counter(clusters[clusters > -1])
-    n_clusters = len(cluster_counts)
-    assert list(range(n_clusters)) == sorted(cluster_counts)
-
-    cluster_sums = {}
-    cluster_nz = {}
-
-    for i in cluster_counts:
-        cluster_sums[i] = data[clusters == i, :].sum(0).compute()
-        cluster_nz[i] = da.sign(data[clusters == i, :]).sum(0).compute()
-
-    cluster_sums = np.vstack([cluster_sums[i] for i in range(n_clusters)])
-    cluster_nz = np.vstack([cluster_nz[i] for i in range(n_clusters)])
-    cluster_counts = np.array([cluster_counts[i] for i in range(n_clusters)])
-
-    z = scipy.cluster.hierarchy.linkage(
-        cluster_sums / cluster_counts[:, None], method="average", metric="cosine"
+    return (
+        sibling_results,
+        subtree_results,
+        len(sibling_results) - n_sib,
+        len(subtree_results) - n_sub,
     )
-    _, rd = scipy.cluster.hierarchy.to_tree(z, rd=True)
-
-    sibling_results = {}
-    subtree_results = {}
-
-    for i in range(0, 2 * n_clusters - 1):
-        if i >= n_clusters:
-            left_child = rd[i].get_left()
-            left = left_child.pre_order()
-
-            right_child = rd[i].get_right()
-            right = right_child.pre_order()
-
-            # don't calculate if it's redundant with a 1-vs-all comp
-            if i == 2 * n_clusters - 2 and (len(left) == 1 or len(right) == 1):
-                continue
-
-            log.debug(f"Comparing {left} with {right}")
-            nz_diff, nz_filter = calc_filter(
-                cluster_counts, cluster_nz, left, right, max_nz_b, delta_nz
-            )
-
-            _, p = de(data, clusters, left, right, nz_filter)
-            sibling_results[i] = p, nz_diff, nz_filter
-
-        if i < 2 * n_clusters - 2:
-            below = rd[i].pre_order()
-            above = [j for j in range(n_clusters) if j not in below]
-
-            # don't calculate redundant comparison
-            if len(above) == 1:
-                continue
-
-            log.debug(f"Comparing {below} with {above}")
-            nz_diff, nz_filter = calc_filter(
-                cluster_counts, cluster_nz, below, above, max_nz_b, delta_nz
-            )
-
-            _, p = de(data, clusters, below, above, nz_filter)
-            subtree_results[i] = p, nz_diff, nz_filter
-
-    return z, sibling_results, subtree_results

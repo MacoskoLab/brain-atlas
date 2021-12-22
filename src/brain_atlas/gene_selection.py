@@ -1,11 +1,13 @@
 import logging
+from typing import Union
 
 import dask.array as da
 import numpy as np
 import scipy.stats
-from numpy.typing import ArrayLike
 
 log = logging.getLogger(__name__)
+
+ArrayLike = Union[np.ndarray, da.Array]
 
 
 # blockwise poisson fit of gene counts

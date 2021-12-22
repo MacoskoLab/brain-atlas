@@ -1,9 +1,11 @@
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence, Union
 
+import dask.array as da
 import numpy as np
 import yaml
-from numpy.typing import ArrayLike
+
+ArrayLike = Union[np.ndarray, da.Array]
 
 
 class LeidenTree:

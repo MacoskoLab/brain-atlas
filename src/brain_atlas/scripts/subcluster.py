@@ -231,28 +231,14 @@ def main(
             kng = da.from_zarr(tree.knn, "kng").compute()
             knd = None  # will load if needed for edge list
         else:
-            translated_kng = None
-            if parent.knn.exists():
-                log.debug(f"loading existing kNN graph from {parent.knn}")
-                original_kng = da.from_zarr(parent.knn, "kng")
-                if original_kng.shape[0] == ci.shape[0]:
-                    translated_kng = neighbors.translate_kng(ci, original_kng.compute())
-                elif original_kng.shape[0] == (clusters > -1).sum():
-                    translated_kng = neighbors.translate_kng(
-                        ci[clusters > -1], original_kng.compute()
-                    )
-                else:
-                    log.warning(
-                        f"kNN shape {original_kng.shape} did not match clusters {ci.shape}"
-                    )
-
             # compute kNN, either on PCA or on counts
             log.info("Computing kNN via pynndescent")
             kng, knd = NNDescent(
                 data=knn_data,
                 n_neighbors=tree.k_neighbors + 1,
                 metric=knn_metric,
-                init_graph=translated_kng,
+                pruning_degree_multiplier=2.0,
+                diversify_prob=0.0,
             ).neighbor_graph
 
             kng = kng.astype(np.int32)

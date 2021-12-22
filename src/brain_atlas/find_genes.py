@@ -6,6 +6,7 @@ import dask.array as da
 import numpy as np
 
 import brain_atlas.util.tree as tree
+from brain_atlas import Key
 from brain_atlas.diff_exp import mannwhitneyu
 
 log = logging.getLogger(__name__)
@@ -70,8 +71,8 @@ def calc_subsample(n_samples: int, subsample: int):
 def cluster_nz_dict(
     data: da.Array,
     clusters: np.ndarray,
-    node_list: Sequence[Tuple[int]],
-    cluster_nz_d: Dict[Tuple[int], np.ndarray] = None,
+    node_list: Sequence[Key],
+    cluster_nz_d: Dict[Key, np.ndarray] = None,
 ):
     """
     Calculates the number of nonzero elements per cluster. If given, an existing
@@ -135,11 +136,11 @@ def de(
 def leiden_tree_diff_exp(
     data: da.array,
     clusters: np.ndarray,
-    node_list: Sequence[Tuple[int]],
-    node_tree: Dict[Tuple[int], tree.MultiNode],
-    cluster_nz_d: Dict[Tuple[int], np.ndarray] = None,
-    sibling_results: Dict[Tuple[int], Tuple[np.ndarray]] = None,
-    subtree_results: Dict[Tuple[int], Tuple[np.ndarray]] = None,
+    node_list: Sequence[Key],
+    node_tree: Dict[Key, tree.MultiNode],
+    cluster_nz_d: Dict[Key, np.ndarray] = None,
+    sibling_results: Dict[Key, Tuple[np.ndarray, ...]] = None,
+    subtree_results: Dict[Key, Tuple[np.ndarray, ...]] = None,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
     subsample: int = None,

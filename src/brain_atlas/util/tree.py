@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List
+
+from brain_atlas import Key
 
 
 class MultiNode:
@@ -8,9 +10,7 @@ class MultiNode:
     A ClusterNode-like tree structure that allows for more than two children per node
     """
 
-    def __init__(
-        self, node_id: Tuple[int], children: List[MultiNode] = None, count: int = 1
-    ):
+    def __init__(self, node_id: Key, children: List[MultiNode] = None, count: int = 1):
         self.node_id = node_id
         self.children = children
         if self.children is None:
@@ -53,7 +53,7 @@ class MultiNode:
         return preorder
 
 
-def to_tree(leaf_list: List[Tuple[int]]):
+def to_tree(leaf_list: List[Key]):
     node_list = leaf_list.copy()
     node_dict = dict()
     node_depth = dict()

@@ -99,8 +99,6 @@ def main(
 
     # check if we are clustering the root (e.g. no parent)
     if len(level) == 0:
-        parent = root  # for cache purposes
-
         log.debug("Using all-zero clustering for root")
         clusters = np.zeros(ds.counts.shape[0], dtype=np.int32)
         ci = np.ones_like(clusters, dtype=bool)

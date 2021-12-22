@@ -146,7 +146,7 @@ def leiden_tree_diff_exp(
     subsample: int = None,
 ):
     cluster_counts = Counter(clusters[clusters > -1])
-    n_nodes = len(node_tree)
+    n_nodes = len(node_list)
     ni_set = set(range(n_nodes))
     assert set(cluster_counts).issubset(ni_set)
 
@@ -161,9 +161,8 @@ def leiden_tree_diff_exp(
     assert all(node_list[i] in cluster_nz_d for i in cluster_counts)
 
     cluster_nz = np.zeros((n_nodes, data.shape[1]))
-    for i, k in enumerate(node_list):
-        if k in cluster_nz_d:
-            cluster_nz[i, :] = cluster_nz_d[k]
+    for k in cluster_nz_d:
+        cluster_nz[k2i[k], :] = cluster_nz_d[k]
 
     cluster_counts = np.array([cluster_counts[i] for i in range(n_nodes)])
 

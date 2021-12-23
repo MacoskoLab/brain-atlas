@@ -19,7 +19,7 @@ def cli(debug: bool = False, log_file: str = None, dask_client: str = None):
     create_logger(debug=debug, log_file=log_file)
     if dask_client is not None:
         client = Client(dask_client)
-        log.debug(f"connected to client {client}")
+        log.debug(f"connected to client {client.scheduler.address}")
 
 
 cli.add_command(filter_mt_cmd, "filter_mt")

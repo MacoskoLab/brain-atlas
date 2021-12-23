@@ -1,8 +1,11 @@
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence, Union
 
 import dask.array as da
+import numpy as np
 import yaml
+
+ArrayLike = Union[np.ndarray, da.Array]
 
 
 class LeidenTree:
@@ -89,14 +92,13 @@ class LeidenTree:
     def subcluster_path(self, level: Sequence[int]):
         return self.dir.joinpath(*map(str, level))
 
-    @property
-    def transform_fn(self):
+    def transform_data(self, data: ArrayLike):
         if self.transform is None:
-            return lambda x: x
+            return data
         elif self.transform == "sqrt":
-            return da.sqrt
+            return np.sqrt(data)
         elif self.transform == "log1p":
-            return da.log1p
+            return np.log1p(data)
         else:
             raise ValueError(f"Unknown transform {self.transform}")
 

@@ -1,4 +1,5 @@
 import logging
+from typing import Union
 
 import dask.array as da
 import numpy as np
@@ -6,30 +7,34 @@ import scipy.stats
 
 log = logging.getLogger(__name__)
 
+ArrayLike = Union[np.ndarray, da.Array]
+
 
 # blockwise poisson fit of gene counts
-def dask_pblock(ds: da.Array, numis: da.Array = None, b: int = 128000):
-    n_cells = ds.shape[0]
+def dask_pblock(counts: ArrayLike, numis: ArrayLike = None, blocksize: int = 128000):
+    n_cells = counts.shape[0]
 
     # pre-compute these values
     log.debug("computing percent nonzero per gene")
-    pct = ((ds > 0).sum(0) / n_cells).compute()
-    log.debug("persisting average expression per gene")
-    exp = ds.sum(0, keepdims=True)
-    exp = (exp / exp.sum()).persist()
+    pct = da.compute((counts > 0).sum(0) / n_cells)[0]
+
+    log.debug("computing average expression per gene")
+    exp = counts.sum(0, keepdims=True)
+    exp = exp / exp.sum()
+
     if numis is None:
-        numis = ds.sum(1, keepdims=True)
+        numis = counts.sum(1, keepdims=True)
 
     exp_pct_nz = np.zeros(exp.shape)  # 1 x n_genes
     var_pct_nz = np.zeros(exp.shape)  # 1 x n_genes
 
     log.debug("computing expected percent nonzero")
     # run in chunks (still large, but seems easier for dask to handle)
-    for i in range(0, n_cells, b):
-        if i % (b * 10) == 0:
+    for i in range(0, n_cells, blocksize):
+        if i % (blocksize * 10) == 0:
             log.debug(f"{i} ...")
 
-        prob_zero = np.exp(-exp.T.dot(numis[i : i + b, :].T))  # n_genes x b
+        prob_zero = np.exp(-exp.T.dot(numis[i : i + blocksize, :].T))  # n_genes x b
 
         exp_pct_nz_b = (1 - prob_zero).sum(1)  # n_genes
         var_pct_nz_b = (prob_zero * (1 - prob_zero)).sum(1)

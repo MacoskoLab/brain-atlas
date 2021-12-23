@@ -68,8 +68,8 @@ log = logging.getLogger(__name__)
 @click.option(
     "--max-array-size",
     type=int,
-    default=25000,
-    help="Threshold for switching from brute-force algo to NNDescent",
+    default=40000,
+    help="Threshold for using in-memory/brute-force algorithms",
 )
 def main(
     root_path: str,
@@ -87,7 +87,7 @@ def main(
     overwrite: bool = False,
     high_res: bool = False,
     output_dir: str = None,
-    max_array_size: int = 25000,
+    max_array_size: int = 40000,
 ):
     """
     Subclusters LEVEL of the ROOT_PATH Leiden tree, performing a sweep across
@@ -99,8 +99,6 @@ def main(
 
     # check if we are clustering the root (e.g. no parent)
     if len(level) == 0:
-        parent = root  # for cache purposes
-
         log.debug("Using all-zero clustering for root")
         clusters = np.zeros(ds.counts.shape[0], dtype=np.int32)
         ci = np.ones_like(clusters, dtype=bool)
@@ -148,6 +146,10 @@ def main(
 
     log.info(f"Processing {n_cells} / {clusters.shape[0]} cells from {tree.data}")
     d_i = ds.counts[ci, :]
+    n_i = ds.numis[ci, :]
+    if n_cells < max_array_size:
+        log.debug("computing in memory")
+        d_i, n_i = da.compute(d_i, n_i)
 
     if valid_cache and tree.selected_genes.exists():
         log.info(f"Loading cached gene selection from {tree.selected_genes}")
@@ -155,7 +157,7 @@ def main(
             selected_genes = d["selected_genes"]
         n_genes = selected_genes.shape[0]
     else:
-        exp_pct_nz, pct, ds_p = dask_pblock(d_i, numis=ds.numis[ci, :])
+        exp_pct_nz, pct, ds_p = dask_pblock(d_i, numis=n_i)
 
         selected_genes = ((exp_pct_nz - pct > min_gene_diff) & (ds_p < -5)).nonzero()[0]
         n_genes = selected_genes.shape[0]
@@ -173,10 +175,12 @@ def main(
 
     # subselect genes
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-        d_i_mem = tree.transform_fn(d_i[:, selected_genes].rechunk((2000, n_genes)))
+        d_i_mem = tree.transform_data(d_i[:, selected_genes])
+        if isinstance(d_i_mem, da.Array):
+            d_i_mem = d_i_mem.rechunk((2000, n_genes))
 
     if scaled:
-        d_i_mem = d_i_mem / da.std(d_i_mem, axis=0, keepdims=True)
+        d_i_mem = d_i_mem / np.std(d_i_mem, axis=0, keepdims=True)
 
     if tree.n_pcs is None:
         # NNDescent will convert this to a numpy array
@@ -211,42 +215,28 @@ def main(
         knn_data = ipca
         knn_metric = "euclidean"
 
-    if knn_data.shape[0] < max_array_size and not tree.n_pcs:
+    if n_cells < max_array_size and not tree.n_pcs:
         # for small arrays, it is faster to compute the full pairwise distance
         log.info("Computing edge list via brute-force algo")
         if tree.jaccard:
             log.debug("calculating jaccard scores")
-            edges = neighbors.k_jaccard_edgelist(knn_data.compute(), k=k_neighbors + 1)
+            edges = neighbors.k_jaccard_edgelist(knn_data, k=k_neighbors + 1)
         else:
-            edges = neighbors.k_cosine_edgelist(knn_data.compute(), k=k_neighbors + 1)
+            edges = neighbors.k_cosine_edgelist(knn_data, k=k_neighbors + 1)
     else:
         if valid_cache and tree.knn.exists():
             log.info(f"Loading cached kNN from {tree.knn}")
             kng = da.from_zarr(tree.knn, "kng").compute()
             knd = None  # will load if needed for edge list
         else:
-            translated_kng = None
-            if parent.knn.exists():
-                log.debug(f"loading existing kNN graph from {parent.knn}")
-                original_kng = da.from_zarr(parent.knn, "kng")
-                if original_kng.shape[0] == ci.shape[0]:
-                    translated_kng = neighbors.translate_kng(ci, original_kng.compute())
-                elif original_kng.shape[0] == (clusters > -1).sum():
-                    translated_kng = neighbors.translate_kng(
-                        ci[clusters > -1], original_kng.compute()
-                    )
-                else:
-                    log.warning(
-                        f"kNN shape {original_kng.shape} did not match clusters {ci.shape}"
-                    )
-
             # compute kNN, either on PCA or on counts
             log.info("Computing kNN via pynndescent")
             kng, knd = NNDescent(
                 data=knn_data,
                 n_neighbors=tree.k_neighbors + 1,
                 metric=knn_metric,
-                init_graph=translated_kng,
+                pruning_degree_multiplier=2.0,
+                diversify_prob=0.0,
             ).neighbor_graph
 
             kng = kng.astype(np.int32)

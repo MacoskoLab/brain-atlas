@@ -144,6 +144,7 @@ def leiden_tree_diff_exp(
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
     subsample: int = None,
+    min_depth: int = 0,
 ):
     cluster_counts = Counter(clusters[clusters > -1])
     n_nodes = len(node_list)
@@ -175,6 +176,9 @@ def leiden_tree_diff_exp(
     n_sub = len(subtree_results)
 
     for k in node_list:
+        if len(k) < min_depth:
+            continue
+
         if not node_tree[k].is_leaf:
             c_lists = {
                 nd.node_id: nd.pre_order(True, nd2i) for nd in node_tree[k].children
@@ -206,7 +210,7 @@ def leiden_tree_diff_exp(
                     sibling_results[j] = p, -nz_diff, nz_filter
                     break
 
-        if k != ():
+        if k != () and min_depth == 0:
             if k in subtree_results:
                 continue
 

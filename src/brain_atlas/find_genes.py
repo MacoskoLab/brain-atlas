@@ -65,7 +65,7 @@ def calc_subsample(n_samples: int, subsample: int):
     if n_samples <= subsample:
         return np.arange(n_samples)
     else:
-        return np.random.choice(n_samples, size=subsample, replace=False)
+        return np.sort(np.random.choice(n_samples, size=subsample, replace=False))
 
 
 def cluster_nz_dict(

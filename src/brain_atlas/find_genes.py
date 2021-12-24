@@ -116,8 +116,8 @@ def de(
     full_p = np.zeros(ds.shape[1])  # logp, no result = 0
 
     if np.any(gene_filter):
-        ds_a = ds[c_a, :]
-        ds_b = ds[c_b, :]
+        ds_a = ds[c_a, :][:, gene_filter]
+        ds_b = ds[c_b, :][:, gene_filter]
         if subsample is not None:
             ds_a = ds_a[calc_subsample(ds_a.shape[0], subsample), :]
             ds_b = ds_b[calc_subsample(ds_b.shape[0], subsample), :]
@@ -125,7 +125,7 @@ def de(
         if isinstance(ds, da.Array):
             ds_a, ds_b = da.compute(ds_a, ds_b)
 
-        u, logp = mannwhitneyu(ds_a[:, gene_filter], ds_b[:, gene_filter])
+        u, logp = mannwhitneyu(ds_a, ds_b)
 
         full_u[gene_filter] = u
         full_p[gene_filter] = logp

@@ -26,7 +26,7 @@ class LeidenTree:
 
     def __init__(
         self,
-        tree_dir: Path,
+        tree_dir: Union[Path, str],
         data: Path,
         n_pcs: Optional[int],
         k_neighbors: int,
@@ -35,7 +35,7 @@ class LeidenTree:
         jaccard: bool = True,
         resolution: str = None,
     ):
-        self.dir = tree_dir
+        self.dir = Path(tree_dir)
         self.dir.mkdir(exist_ok=True)
 
         assert data.exists(), f"{data} does not exist"

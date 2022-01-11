@@ -13,7 +13,7 @@ from brain_atlas.util.tree import MultiNode
 log = logging.getLogger(__name__)
 
 
-@nb.njit(fastmath=True)
+@nb.njit
 def calc_log_fc(
     count_array: np.ndarray,
     sum_array: np.ndarray,
@@ -32,7 +32,7 @@ def calc_log_fc(
     return log_fc
 
 
-@nb.njit(fastmath=True)
+@nb.njit
 def calc_nz(
     count_array: np.ndarray,
     nz_array: np.ndarray,
@@ -48,7 +48,7 @@ def calc_nz(
     return left_nz, right_nz
 
 
-@nb.njit(fastmath=True)
+@nb.njit
 def calc_filter(
     cluster_counts: np.ndarray,
     cluster_nz: np.ndarray,

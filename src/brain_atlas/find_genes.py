@@ -148,7 +148,7 @@ def prep_de(clusters, node_list, cluster_nz_d, n_genes):
 
 
 def sibling_de(
-    data: da.array,
+    data: da.Array,
     clusters: np.ndarray,
     node_list: Sequence[Key],
     node_tree: Dict[Key, MultiNode],
@@ -210,7 +210,7 @@ def sibling_de(
 
 
 def subtree_de(
-    data: da.array,
+    data: da.Array,
     clusters: np.ndarray,
     node_list: Sequence[Key],
     node_tree: Dict[Key, MultiNode],

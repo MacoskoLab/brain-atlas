@@ -1,3 +1,4 @@
+import itertools
 import logging
 from collections import Counter, defaultdict
 from typing import Dict, Sequence, Tuple, Union
@@ -207,6 +208,58 @@ def sibling_de(
                 break
 
     return sibling_results, len(sibling_results) - n_sib
+
+
+def pairwise_sibling_de(
+    data: da.Array,
+    clusters: np.ndarray,
+    node_list: Sequence[Key],
+    node_tree: Dict[Key, MultiNode],
+    cluster_nz_d: Dict[Key, np.ndarray],
+    pairwise_results: Dict[Key, Tuple[np.ndarray, ...]] = None,
+    delta_nz: float = 0.2,
+    max_nz_b: float = 0.2,
+    subsample: int = None,
+    min_depth: int = 0,
+):
+    k2i, cluster_nz, cluster_counts = prep_de(
+        clusters, node_list, cluster_nz_d, data.shape[1]
+    )
+
+    def nd2i(nd):
+        return k2i[nd.node_id]
+
+    if pairwise_results is None:
+        pairwise_results = dict()
+
+    n_pairs = len(pairwise_results)
+
+    for k in node_list:
+        if len(k) < min_depth or node_tree[k].is_leaf:
+            continue
+
+        c_arrays = {
+            nd.node_id: np.array(nd.pre_order(True, nd2i))
+            for nd in node_tree[k].children
+        }
+
+        for i, j in itertools.combinations(sorted(c_arrays), 2):
+            c_i = c_arrays[i]
+            c_j = c_arrays[j]
+
+            # don't calculate if it's redundant with a 1-vs-all comp
+            if k == () and (len(c_i) == 1 or len(c_j) == 1):
+                continue
+
+            # log.debug(f"Comparing {c_this} with {c_other}")
+            nz_diff, nz_filter = calc_filter(
+                cluster_counts, cluster_nz, c_i, c_j, max_nz_b, delta_nz
+            )
+
+            _, p = de(data, clusters, c_i, c_j, nz_filter, subsample)
+            pairwise_results[i, j] = p, nz_diff, nz_filter
+
+    return pairwise_results, len(pairwise_results) - n_pairs
 
 
 def subtree_de(

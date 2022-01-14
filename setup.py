@@ -48,7 +48,6 @@ setuptools.setup(
         "scipy",
         "sparse",
         "tables",
-        "tqdm",
         "umap-learn",
         "zarr",
     ],

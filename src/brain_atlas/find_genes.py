@@ -131,7 +131,19 @@ def de(
     return full_u, full_p
 
 
-def prep_de(clusters, node_list, cluster_nz_d, n_genes):
+def generic_de(
+    get_comps,
+    data: da.Array,
+    clusters: np.ndarray,
+    node_list: Sequence[Key],
+    node_tree: Dict[Key, MultiNode],
+    cluster_nz_d: Dict[Key, np.ndarray],
+    de_results: Dict[Key, Tuple[np.ndarray, ...]],
+    delta_nz: float = 0.2,
+    max_nz_b: float = 0.2,
+    subsample: int = None,
+    min_depth: int = 0,
+):
     cluster_counts = Counter(clusters[clusters > -1])
     n_nodes = len(node_list)
     assert set(cluster_counts).issubset(range(n_nodes))
@@ -139,13 +151,76 @@ def prep_de(clusters, node_list, cluster_nz_d, n_genes):
 
     k2i = {k: i for i, k in enumerate(node_list)}
 
-    cluster_nz = np.zeros((n_nodes, n_genes))
+    def nd2i(nd):
+        return k2i[nd.node_id]
+
+    cluster_nz = np.zeros((n_nodes, data.shape[1]))
     for k in cluster_nz_d:
         cluster_nz[k2i[k], :] = cluster_nz_d[k]
 
     cluster_counts = np.array([cluster_counts[i] for i in range(n_nodes)])
 
-    return k2i, cluster_nz, cluster_counts
+    for k in node_list:
+        if len(k) < min_depth:
+            continue
+
+        for comp, c_i, c_j in get_comps(k, node_tree, nd2i):
+            if comp in de_results:
+                continue
+
+            log.debug(f"Comparing {c_i} with {c_j}")
+            nz_diff, nz_filter = calc_filter(
+                cluster_counts, cluster_nz, c_i, c_j, max_nz_b, delta_nz
+            )
+
+            _, p = de(data, clusters, c_i, c_j, nz_filter, subsample)
+            de_results[comp] = p, nz_diff, nz_filter
+
+
+def sibling_comps(k, node_tree, nd2i):
+    if node_tree[k].is_leaf:
+        return
+
+    c_arrays = {
+        nd.node_id: np.array(nd.pre_order(True, nd2i)) for nd in node_tree[k].children
+    }
+
+    for nd in node_tree[k].children:
+        i = nd.node_id
+
+        c_i = c_arrays[i]
+        c_j = np.hstack([c_arrays[j] for j in c_arrays if i != j])
+
+        yield i, c_i, c_j
+
+        if len(node_tree[k].children) == 2:
+            break
+
+
+def pairwise_comps(k, node_tree, nd2i):
+    if node_tree[k].is_leaf:
+        return
+
+    c_arrays = {
+        nd.node_id: np.array(nd.pre_order(True, nd2i)) for nd in node_tree[k].children
+    }
+
+    for nd_i, nd_j in itertools.combinations(node_tree[k].children, 2):
+        c_i = c_arrays[nd_i.node_id]
+        c_j = c_arrays[nd_j.node_id]
+
+        yield (nd_i.node_id, nd_j.node_id), c_i, c_j
+
+
+def subtree_comps(k, node_tree, nd2i):
+    if k == ():
+        return
+
+    below = np.array(node_tree[k].pre_order(True, nd2i))
+    above = np.arange(len(node_tree))
+    above = above[~np.isin(above, below)]
+
+    yield k, below, above
 
 
 def sibling_de(
@@ -160,54 +235,38 @@ def sibling_de(
     subsample: int = None,
     min_depth: int = 0,
 ):
-    k2i, cluster_nz, cluster_counts = prep_de(
-        clusters, node_list, cluster_nz_d, data.shape[1]
-    )
-
-    def nd2i(nd):
-        return k2i[nd.node_id]
-
     if sibling_results is None:
         sibling_results = dict()
 
-    n_sib = len(sibling_results)
+    n_de = len(sibling_results)
+
+    generic_de(
+        sibling_comps,
+        data,
+        clusters,
+        node_list,
+        node_tree,
+        cluster_nz_d,
+        sibling_results,
+        delta_nz,
+        max_nz_b,
+        subsample,
+        min_depth,
+    )
 
     for k in node_list:
         if len(k) < min_depth or node_tree[k].is_leaf:
             continue
 
-        c_arrays = {
-            nd.node_id: np.array(nd.pre_order(True, nd2i))
-            for nd in node_tree[k].children
-        }
+        if len(node_tree[k].children) == 2:
+            j = node_tree[k].children[1].node_id
+            if j not in sibling_results:
+                i = node_tree[k].children[0].node_id
+                p, nz_diff, nz_filter = sibling_results[i]
 
-        for n in node_tree[k].children:
-            i = n.node_id
-            if i in sibling_results:
-                continue
-
-            c_i = c_arrays[i]
-            c_j = np.hstack([c_arrays[j] for j in c_arrays if i != j])
-
-            # don't calculate if it's redundant with a 1-vs-all comp
-            if k == () and (len(c_i) == 1 or len(c_j) == 1):
-                continue
-
-            log.debug(f"Comparing {c_i} with {c_j}")
-            nz_diff, nz_filter = calc_filter(
-                cluster_counts, cluster_nz, c_i, c_j, max_nz_b, delta_nz
-            )
-
-            _, p = de(data, clusters, c_i, c_j, nz_filter, subsample)
-            sibling_results[i] = p, nz_diff, nz_filter
-
-            # common special case is 2 siblings: results are symmetrical
-            if len(node_tree[k].children) == 2:
-                j = node_tree[k].children[1].node_id
                 sibling_results[j] = p, -nz_diff, nz_filter
-                break
 
-    return sibling_results, len(sibling_results) - n_sib
+    return sibling_results, len(sibling_results) - n_de
 
 
 def pairwise_sibling_de(
@@ -222,44 +281,26 @@ def pairwise_sibling_de(
     subsample: int = None,
     min_depth: int = 0,
 ):
-    k2i, cluster_nz, cluster_counts = prep_de(
-        clusters, node_list, cluster_nz_d, data.shape[1]
-    )
-
-    def nd2i(nd):
-        return k2i[nd.node_id]
-
     if pairwise_results is None:
         pairwise_results = dict()
 
-    n_pairs = len(pairwise_results)
+    n_de = len(pairwise_results)
 
-    for k in node_list:
-        if len(k) < min_depth or node_tree[k].is_leaf:
-            continue
+    generic_de(
+        pairwise_comps,
+        data,
+        clusters,
+        node_list,
+        node_tree,
+        cluster_nz_d,
+        pairwise_results,
+        delta_nz,
+        max_nz_b,
+        subsample,
+        min_depth,
+    )
 
-        c_arrays = {
-            nd.node_id: np.array(nd.pre_order(True, nd2i))
-            for nd in node_tree[k].children
-        }
-
-        for i, j in itertools.combinations(sorted(c_arrays), 2):
-            c_i = c_arrays[i]
-            c_j = c_arrays[j]
-
-            # don't calculate if it's redundant with a 1-vs-all comp
-            if k == () and (len(c_i) == 1 or len(c_j) == 1):
-                continue
-
-            # log.debug(f"Comparing {c_this} with {c_other}")
-            nz_diff, nz_filter = calc_filter(
-                cluster_counts, cluster_nz, c_i, c_j, max_nz_b, delta_nz
-            )
-
-            _, p = de(data, clusters, c_i, c_j, nz_filter, subsample)
-            pairwise_results[i, j] = p, nz_diff, nz_filter
-
-    return pairwise_results, len(pairwise_results) - n_pairs
+    return pairwise_results, len(pairwise_results) - n_de
 
 
 def subtree_de(
@@ -274,36 +315,26 @@ def subtree_de(
     subsample: int = None,
     min_depth: int = 0,
 ):
-    nd2i, cluster_nz, cluster_counts = prep_de(
-        clusters, node_list, cluster_nz_d, data.shape[1]
-    )
-
     if subtree_results is None:
         subtree_results = dict()
 
-    n_sub = len(subtree_results)
-    ni_set = set(range(len(node_list)))
+    n_de = len(subtree_results)
 
-    for k in node_list:
-        if k == () or len(k) < min_depth or k in subtree_results:
-            continue
+    generic_de(
+        subtree_comps,
+        data,
+        clusters,
+        node_list,
+        node_tree,
+        cluster_nz_d,
+        subtree_results,
+        delta_nz,
+        max_nz_b,
+        subsample,
+        min_depth,
+    )
 
-        below = np.array(node_tree[k].pre_order(True, nd2i))
-        above = np.array(sorted(ni_set - set(below)))
-
-        # don't calculate redundant comparison
-        if len(above) == 1:
-            continue
-
-        log.debug(f"Comparing {below} with {above}")
-        nz_diff, nz_filter = calc_filter(
-            cluster_counts, cluster_nz, below, above, max_nz_b, delta_nz
-        )
-
-        _, p = de(data, clusters, below, above, nz_filter, subsample)
-        subtree_results[k] = p, nz_diff, nz_filter
-
-    return subtree_results, len(subtree_results) - n_sub
+    return subtree_results, len(subtree_results) - n_de
 
 
 def get_de_totals(

@@ -11,12 +11,12 @@ dependencies:
   - google-auth
   - google-cloud-secret-manager
   # data
+  - h5py
   - networkx
   - numpy
   - openpyxl
   - pandas
   - pynndescent
-  - pytables
   - scipy
   - sparse
   - umap-learn

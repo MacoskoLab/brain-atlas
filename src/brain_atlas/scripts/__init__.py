@@ -4,6 +4,7 @@ import click
 from dask.distributed import Client
 
 from brain_atlas.scripts.filter_mt import main as filter_mt_cmd
+from brain_atlas.scripts.gcs_to_zarr import main as gcs_to_zarr_cmd
 from brain_atlas.scripts.make_zarr import main as make_zarr_cmd
 from brain_atlas.scripts.subcluster import main as subcluster_cmd
 from brain_atlas.util import create_logger
@@ -22,6 +23,7 @@ def cli(debug: bool = False, log_file: str = None, dask_client: str = None):
         log.debug(f"connected to client {client.scheduler.address}")
 
 
-cli.add_command(filter_mt_cmd, "filter_mt")
-cli.add_command(make_zarr_cmd, "make_zarr")
+cli.add_command(filter_mt_cmd, "filter-mt")
+cli.add_command(gcs_to_zarr_cmd, "gcs-to-zarr")
+cli.add_command(make_zarr_cmd, "make-zarr")
 cli.add_command(subcluster_cmd, "subcluster")

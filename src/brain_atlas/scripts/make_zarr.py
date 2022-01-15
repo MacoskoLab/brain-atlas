@@ -42,7 +42,6 @@ def main(
 
     cell_lists = []
     gene_set = set()
-    gid_set = set()
 
     log.info(f"writing output to {output_zarr}")
     g = zarr.open_group(store=output_zarr, mode="w")
@@ -65,12 +64,11 @@ def main(
 
     for fp in h5_files:
         i, j = z.shape
-        m, mcells, mgenes, mgids = read_10x_h5(fp)
+        m, mcells, mgenes = read_10x_h5(str(fp))
         assert len(mcells) == len(set(mcells))
         assert j == 0 or j == m.shape[1]
 
         gene_set.add(mgenes)
-        gid_set.add(mgids)
 
         numis = np.asarray(m.sum(1)).squeeze()
         over_min = numis >= min_umis
@@ -87,8 +85,6 @@ def main(
 
     assert len(gene_set) == 1, "Multiple gene lists found"
     genes = gene_set.pop()
-    assert len(gid_set) == 1
-    gids = gid_set.pop()
 
     if output_cells is not None:
         log.info(f"Writing cell list to {output_cells}")
@@ -101,8 +97,6 @@ def main(
     if output_genes is not None:
         log.info(f"Writing gene list to {output_genes}")
         with optional_gzip(output_genes, "w") as out:
-            print(
-                "\n".join(f"{gene}\t{gid}" for gene, gid in zip(genes, gids)), file=out
-            )
+            print("\n".join(f"{gene}\t{gid}" for gene, gid in genes), file=out)
 
     log.info("Done!")

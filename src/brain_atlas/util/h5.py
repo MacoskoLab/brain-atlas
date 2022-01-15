@@ -38,7 +38,7 @@ def read_10x_h5_meta_from_gcs(path: str, fs: GCSFileSystem):
             barcodes = tuple(fh["matrix"]["barcodes"].asstr())
 
     barcodes = [f"{lib_name}_{c}" for c in barcodes]
-    return (N, M), (genes,), barcodes
+    return (N, M), barcodes, genes
 
 
 @dask.delayed(pure=True, nout=1)

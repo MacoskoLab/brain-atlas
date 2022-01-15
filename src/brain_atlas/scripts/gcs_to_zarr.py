@@ -22,10 +22,12 @@ log = logging.getLogger(__name__)
 @click.command(name="make-zarr", no_args_is_help=True)
 @click.argument("h5-files", nargs=-1, metavar="H5_FILE [H5_FILE ... ]")
 @click.option(
-    "--output-zarr", required=True, type=click.Path(dir_okay=True, file_okay=False)
+    "--output-zarr",
+    required=True,
+    type=click.Path(dir_okay=True, file_okay=False, exists=False),
 )
-@click.option("--output-cells", required=True, type=click.Path())
-@click.option("--output-genes", required=True, type=click.Path())
+@click.option("--output-cells", required=True, type=click.Path(dir_okay=False))
+@click.option("--output-genes", required=True, type=click.Path(dir_okay=False))
 @click.option("--min-umis", type=int, default=500)
 @click.option("-p", "--max-pct", type=float, default=0.01)
 @click.option("--google-project", help="GCP Project ID to use")
@@ -50,10 +52,12 @@ def main(
     log.info(f"reading metadata for {len(h5_files)} h5 files")
 
     sgb = [read_10x_h5_meta_from_gcs(path, fs) for path in h5_files]
-    sizes, genes, barcodes = zip(*dask.compute(sgb)[0])
+    sizes, barcodes, genes = zip(*dask.compute(sgb)[0])
+    genes = set(genes)
 
     assert len(genes) == 1, "Multiple gene lists found"
     genes = genes.pop()
+    assert all(len(genes) == M for _, M in sizes), "Array sizes do not match n_genes"
     mito_idx = np.array(
         [i for i, (gene_name, _) in enumerate(genes) if gene_name.startswith("mt")]
     )
@@ -82,7 +86,7 @@ def main(
 
     log.info("Reading data and writing to Zarr")
     matrices = [
-        read_10x_h5_from_gcs(path, cf) for path, cf in zip(h5_files, h5_filters)
+        read_10x_h5_from_gcs(path, cf, fs) for path, cf in zip(h5_files, h5_filters)
     ]
 
     big_array = da.vstack(

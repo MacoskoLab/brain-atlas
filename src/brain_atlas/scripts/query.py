@@ -77,7 +77,7 @@ def main(
         query = np.array(query)[None, :]
 
         log.debug(f"Looking for query: {query_name}")
-        array_ix = np.all(key_array[:, : query.shape[1]] == query, 1).compute()
+        array_ix = da.compute(np.all(key_array[:, : query.shape[1]] == query, 1))
         if array_ix.sum() == 0:
             log.error("No cells found, quitting")
             return

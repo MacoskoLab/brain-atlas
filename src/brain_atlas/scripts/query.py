@@ -123,9 +123,11 @@ def main(
     assert subsample_ix.sum() == n_cells
     array_ix[array_ix] = subsample_ix
 
-    log.info(f"Downloading {n_cells} cells from {data_path}")
+    log.info(f"Retrieving {n_cells} cells from {data_path}")
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+        log.debug("downloading array")
         data_array = count_array[array_ix, :].compute()
+        log.debug("downloading metadata")
         metadata_df = metadata_df.loc[
             da.array(array_ix).rechunk(Dataset.CHUNKS), :
         ].compute()

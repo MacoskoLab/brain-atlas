@@ -17,18 +17,34 @@ log = logging.getLogger(__name__)
 
 @click.group()
 @click.option("--debug", is_flag=True, help="Turn on debug logging")
-@click.option("--log-file", type=click.Path(writable=True, path_type=Path))
+@click.option("-l", "--log-file", type=click.Path(writable=True, path_type=Path))
 @click.option("-d", "--dask-client")
-def cli(debug: bool = False, log_file: Path = None, dask_client: str = None):
+@click.option(
+    "--no-dask/--dask",
+    "start_cluster",
+    is_flag=True,
+    help="Start a Dask cluster if one can't be found",
+    default=False,
+)
+def cli(
+    debug: bool = False,
+    log_file: Path = None,
+    dask_client: str = None,
+    start_cluster: bool = False,
+):
     create_logger(debug=debug, log_file=log_file)
     if dask_client is None:
-        dask_client = dask.distributed.client._get_global_client()
-
-    if dask_client is not None:
-        client = Client(dask_client)
-        log.debug(f"connected to client {client.scheduler.address}")
+        client = dask.distributed.client._get_global_client()
+        if client is None:
+            log.info("No Dask cluster found")
+            if start_cluster:
+                log.info("Starting cluster on local machine")
+                client = dask.distributed.Client()
     else:
-        log.debug("No dask server detected")
+        client = Client(dask_client)
+
+    if client is not None:
+        log.debug(f"connected to client {client.scheduler.address}")
 
 
 cli.add_command(filter_mt_cmd, "filter-mt")

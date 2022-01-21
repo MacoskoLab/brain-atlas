@@ -4,32 +4,38 @@ channels:
   - defaults
 dependencies:
   - python=3.9
+  - pip
   - jupyterlab
   - nodejs
+  - click
   # cloud
   - gcsfs
+  - google-api-python-client
   - google-auth
   - google-cloud-secret-manager
   # data
   - h5py
-  - networkx
+  - leidenalg
+  - numba
   - numpy
   - openpyxl
   - pandas
+  - pyarrow
   - pynndescent
+  - python-igraph
+  - pyyaml
+  - scikit-learn
   - scipy
   - sparse
   - umap-learn
   - zarr
   # dask
-  - coiled
   - dask
   - dask-labextension
   - dask-ml
   # visualization
   - bokeh
-  - datashader
-  - holoviews
   - jupyter_bokeh
-  - jupyterlab_pyviz
   - matplotlib
+  - pip:
+      - -e .

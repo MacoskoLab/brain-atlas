@@ -13,6 +13,8 @@ from brain_atlas.util.tree import MultiNode
 
 log = logging.getLogger(__name__)
 
+ArrayLike = Union[np.ndarray, da.Array]
+
 
 @nb.njit
 def calc_log_fc(
@@ -28,7 +30,7 @@ def calc_log_fc(
     right_mean = sum_array[group2, :].sum(axis=0) / right_n
 
     eps = 1 / (left_n + right_n)
-    log_fc = np.abs(np.log(left_mean + eps) - np.log(right_mean + eps))
+    log_fc = np.log(left_mean + eps) - np.log(right_mean + eps)
 
     return log_fc
 
@@ -100,7 +102,7 @@ def cluster_nz_dict(
 
 
 def de(
-    ds: Union[np.ndarray, da.Array],
+    data: ArrayLike,
     clusters: np.ndarray,
     group1: np.ndarray,
     group2: np.ndarray,
@@ -110,17 +112,17 @@ def de(
     c_a = np.isin(clusters, group1)
     c_b = np.isin(clusters, group2)
 
-    full_u = np.zeros(ds.shape[1])
-    full_p = np.zeros(ds.shape[1])  # logp, no result = 0
+    full_u = np.zeros(data.shape[1])
+    full_p = np.zeros(data.shape[1])  # logp, no result = 0
 
     if np.any(gene_filter):
-        ds_a = ds[c_a, :][:, gene_filter]
-        ds_b = ds[c_b, :][:, gene_filter]
+        ds_a = data[c_a, :][:, gene_filter]
+        ds_b = data[c_b, :][:, gene_filter]
         if subsample is not None:
             ds_a = ds_a[calc_subsample(ds_a.shape[0], subsample), :]
             ds_b = ds_b[calc_subsample(ds_b.shape[0], subsample), :]
 
-        if isinstance(ds, da.Array):
+        if isinstance(data, da.Array):
             ds_a, ds_b = da.compute(ds_a, ds_b)
 
         u, logp = mannwhitneyu(ds_a, ds_b)
@@ -133,7 +135,7 @@ def de(
 
 def generic_de(
     get_comps,
-    data: da.Array,
+    data: ArrayLike,
     clusters: np.ndarray,
     node_list: Sequence[Key],
     node_tree: Dict[Key, MultiNode],
@@ -224,7 +226,7 @@ def subtree_comps(k, node_tree, nd2i):
 
 
 def sibling_de(
-    data: da.Array,
+    data: ArrayLike,
     clusters: np.ndarray,
     node_list: Sequence[Key],
     node_tree: Dict[Key, MultiNode],
@@ -270,7 +272,7 @@ def sibling_de(
 
 
 def pairwise_sibling_de(
-    data: da.Array,
+    data: ArrayLike,
     clusters: np.ndarray,
     node_list: Sequence[Key],
     node_tree: Dict[Key, MultiNode],
@@ -304,7 +306,7 @@ def pairwise_sibling_de(
 
 
 def subtree_de(
-    data: da.Array,
+    data: ArrayLike,
     clusters: np.ndarray,
     node_list: Sequence[Key],
     node_tree: Dict[Key, MultiNode],

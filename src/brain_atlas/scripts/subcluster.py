@@ -21,7 +21,9 @@ log = logging.getLogger(__name__)
 
 
 @click.command("subcluster")
-@click.argument("root-path", type=click.Path(dir_okay=True, file_okay=False))
+@click.argument(
+    "root-path", type=click.Path(dir_okay=True, file_okay=False, path_type=Path)
+)
 @click.argument("level", type=int, nargs=-1)
 @click.option("-n", "--n-pcs", type=int, help="Number of PCs to compute, if any")
 @click.option("-k", "--k-neighbors", type=int)
@@ -62,7 +64,7 @@ log = logging.getLogger(__name__)
 @click.option(
     "-o",
     "--output-dir",
-    type=click.Path(dir_okay=True, file_okay=False),
+    type=click.Path(dir_okay=True, file_okay=False, path_type=Path),
     help="Alternate directory for output",
 )
 @click.option(
@@ -72,7 +74,7 @@ log = logging.getLogger(__name__)
     help="Threshold for using in-memory/brute-force algorithms",
 )
 def main(
-    root_path: str,
+    root_path: Path,
     level: Sequence[int],
     n_pcs: int = None,
     k_neighbors: int = None,
@@ -86,7 +88,7 @@ def main(
     resolution: str = None,
     overwrite: bool = False,
     high_res: bool = False,
-    output_dir: str = None,
+    output_dir: Path = None,
     max_array_size: int = 40000,
 ):
     """
@@ -94,7 +96,7 @@ def main(
     the specified resolutions, stopping at the optional cutoff.
     """
 
-    root = LeidenTree.from_path(Path(root_path))
+    root = LeidenTree.from_path(root_path)
     ds = Dataset(root.data)
 
     # check if we are clustering the root (e.g. no parent)

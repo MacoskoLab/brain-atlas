@@ -22,6 +22,7 @@ dependencies:
   - pandas
   - pyarrow
   - pynndescent
+  - python-igraph
   - pyyaml
   - scipy
   - sparse

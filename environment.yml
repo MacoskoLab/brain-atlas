@@ -22,9 +22,7 @@ dependencies:
   - pandas
   - pyarrow
   - pynndescent
-  - python-igraph
   - pyyaml
-  - scikit-learn
   - scipy
   - sparse
   - umap-learn

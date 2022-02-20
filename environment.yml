@@ -24,7 +24,6 @@ dependencies:
   - pynndescent
   - python-igraph
   - pyyaml
-  - scikit-learn
   - scipy
   - sparse
   - umap-learn

@@ -1,7 +1,7 @@
 import itertools
 import logging
-from collections import Counter, defaultdict
-from typing import Dict, Sequence, Tuple, Union
+from collections import defaultdict
+from typing import Any, Counter, Dict, Tuple, Union
 
 import dask.array as da
 import numba as nb
@@ -9,11 +9,12 @@ import numpy as np
 
 from brain_atlas import Key
 from brain_atlas.diff_exp import mannwhitneyu
-from brain_atlas.util.tree import MultiNode
+from brain_atlas.util.tree import NodeTree
 
 log = logging.getLogger(__name__)
 
 ArrayLike = Union[np.ndarray, da.Array]
+ResultsDict = Dict[Any, Tuple[np.ndarray, ...]]
 
 
 @nb.njit
@@ -23,14 +24,14 @@ def calc_log_fc(
     group1: np.ndarray,
     group2: np.ndarray,
 ) -> np.ndarray:
-    left_n = count_array[group1].sum()
-    left_mean = sum_array[group1, :].sum(axis=0) / left_n
+    n_1 = count_array[group1].sum()
+    mu_1 = sum_array[group1, :].sum(axis=0) / n_1
 
-    right_n = count_array[group2].sum()
-    right_mean = sum_array[group2, :].sum(axis=0) / right_n
+    n_2 = count_array[group2].sum()
+    mu_2 = sum_array[group2, :].sum(axis=0) / n_2
 
-    eps = 1 / (left_n + right_n)
-    log_fc = np.log(left_mean + eps) - np.log(right_mean + eps)
+    eps = 1 / (n_1 + n_2)
+    log_fc = np.log(mu_1 + eps) - np.log(mu_2 + eps)
 
     return log_fc
 
@@ -42,13 +43,13 @@ def calc_nz(
     group1: np.ndarray,
     group2: np.ndarray,
 ):
-    left_n = count_array[group1].sum()
-    left_nz = nz_array[group1, :].sum(axis=0) / left_n
+    n_1 = count_array[group1].sum()
+    nz_1 = nz_array[group1, :].sum(axis=0) / n_1
 
-    right_n = count_array[group2].sum()
-    right_nz = nz_array[group2, :].sum(axis=0) / right_n
+    n_2 = count_array[group2].sum()
+    nz_2 = nz_array[group2, :].sum(axis=0) / n_2
 
-    return left_nz, right_nz
+    return nz_1, nz_2
 
 
 @nb.njit
@@ -60,12 +61,10 @@ def calc_filter(
     max_nz_b: float,
     delta_nz: float,
 ):
-    nzA, nzB = calc_nz(cluster_counts, cluster_nz, group1, group2)
-    min_nz = np.minimum(nzA, nzB)
-    nz_diff = nzA - nzB
-    nz_filter = (min_nz < max_nz_b) & (np.abs(nz_diff) > delta_nz)
+    nz_1, nz_2 = calc_nz(cluster_counts, cluster_nz, group1, group2)
+    nz_filter = (np.minimum(nz_1, nz_2) < max_nz_b) & (np.abs(nz_1 - nz_2) > delta_nz)
 
-    return nz_diff, nz_filter
+    return nz_1, nz_2, nz_filter
 
 
 def calc_subsample(n_samples: int, subsample: int):
@@ -76,16 +75,15 @@ def calc_subsample(n_samples: int, subsample: int):
 
 
 def cluster_nz_dict(
-    data: da.Array,
-    clusters: np.ndarray,
-    node_list: Sequence[Key],
-    blocksize: int = 256000,
+    data: da.Array, clusters: np.ndarray, node_tree: NodeTree, blocksize: int = 256000
 ):
     """
-    Calculates the number of nonzero elements per cluster.
+    Calculates the number of nonzero elements per cluster. The values in `clusters` must
+    match the index attributes of the nodes in `node_tree`
     """
     n_cells, n_genes = data.shape
 
+    ix_to_node = {node_tree[k].index: k for k in node_tree}
     cluster_nz_d = defaultdict(lambda: np.zeros(n_genes, dtype=np.uint32))
 
     log.debug("counting nonzero elements")
@@ -94,7 +92,7 @@ def cluster_nz_dict(
         cluster_i = clusters[i : i + blocksize]
         data = da.sign(data.counts[i : i + blocksize, :]).compute()
         for j in np.unique(cluster_i):
-            cluster_nz_d[node_list[j]] += data[cluster_i == j, :].sum(0)
+            cluster_nz_d[ix_to_node[j]] += data[cluster_i == j, :].sum(0)
 
     cluster_nz_d = dict(cluster_nz_d)
 
@@ -137,54 +135,45 @@ def generic_de(
     get_comps,
     data: ArrayLike,
     clusters: np.ndarray,
-    node_list: Sequence[Key],
-    node_tree: Dict[Key, MultiNode],
+    node_tree: NodeTree,
     cluster_nz_d: Dict[Key, np.ndarray],
-    de_results: Dict[Key, Tuple[np.ndarray, ...]],
+    cluster_count_d: Counter[Key],
+    de_results: ResultsDict,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
     subsample: int = None,
-    min_depth: int = 0,
 ):
-    cluster_counts = Counter(clusters[clusters > -1])
-    n_nodes = len(node_list)
-    assert set(cluster_counts).issubset(range(n_nodes))
-    assert all(node_list[i] in cluster_nz_d for i in cluster_counts)
-
-    k2i = {k: i for i, k in enumerate(node_list)}
-
-    def nd2i(nd):
-        return k2i[nd.node_id]
+    n_nodes = len(node_tree)
+    assert set(cluster_count_d).issubset(node_tree)
+    assert set(cluster_count_d) == set(cluster_nz_d)
 
     cluster_nz = np.zeros((n_nodes, data.shape[1]))
+    cluster_counts = np.zeros(n_nodes)
     for k in cluster_nz_d:
-        cluster_nz[k2i[k], :] = cluster_nz_d[k]
+        cluster_nz[node_tree[k].index, :] = cluster_nz_d[k]
+        cluster_counts[node_tree[k].index] = cluster_count_d[k]
 
-    cluster_counts = np.array([cluster_counts[i] for i in range(n_nodes)])
-
-    for k in node_list:
-        if len(k) < min_depth:
-            continue
-
-        for comp, c_i, c_j in get_comps(k, node_tree, nd2i):
+    for k in node_tree:
+        for comp, c_i, c_j in get_comps(k, node_tree):
             if comp in de_results:
                 continue
 
             log.debug(f"Comparing {c_i} with {c_j}")
-            nz_diff, nz_filter = calc_filter(
+            nz_i, nz_j, nz_filter = calc_filter(
                 cluster_counts, cluster_nz, c_i, c_j, max_nz_b, delta_nz
             )
 
             _, p = de(data, clusters, c_i, c_j, nz_filter, subsample)
-            de_results[comp] = p, nz_diff, nz_filter
+            de_results[comp] = p, nz_i, nz_j, nz_filter
 
 
-def sibling_comps(k, node_tree, nd2i):
+def sibling_comps(k: Key, node_tree: NodeTree):
     if node_tree[k].is_leaf:
         return
 
     c_arrays = {
-        nd.node_id: np.array(nd.pre_order(True, nd2i)) for nd in node_tree[k].children
+        nd.node_id: np.array(nd.pre_order(True, lambda nd: nd.index))
+        for nd in node_tree[k].children
     }
 
     for nd in node_tree[k].children:
@@ -199,12 +188,13 @@ def sibling_comps(k, node_tree, nd2i):
             break
 
 
-def pairwise_comps(k, node_tree, nd2i):
+def pairwise_comps(k: Key, node_tree: NodeTree):
     if node_tree[k].is_leaf:
         return
 
     c_arrays = {
-        nd.node_id: np.array(nd.pre_order(True, nd2i)) for nd in node_tree[k].children
+        nd.node_id: np.array(nd.pre_order(True, lambda nd: nd.index))
+        for nd in node_tree[k].children
     }
 
     for nd_i, nd_j in itertools.combinations(node_tree[k].children, 2):
@@ -214,11 +204,11 @@ def pairwise_comps(k, node_tree, nd2i):
         yield (nd_i.node_id, nd_j.node_id), c_i, c_j
 
 
-def subtree_comps(k, node_tree, nd2i):
+def subtree_comps(k: Key, node_tree: NodeTree):
     if k == ():
         return
 
-    below = np.array(node_tree[k].pre_order(True, nd2i))
+    below = np.array(node_tree[k].pre_order(True, lambda nd: nd.index))
     above = np.arange(len(node_tree))
     above = above[~np.isin(above, below)]
 
@@ -228,14 +218,13 @@ def subtree_comps(k, node_tree, nd2i):
 def sibling_de(
     data: ArrayLike,
     clusters: np.ndarray,
-    node_list: Sequence[Key],
-    node_tree: Dict[Key, MultiNode],
+    node_tree: NodeTree,
     cluster_nz_d: Dict[Key, np.ndarray],
-    sibling_results: Dict[Key, Tuple[np.ndarray, ...]] = None,
+    cluster_count_d: Counter[Key],
+    sibling_results: ResultsDict = None,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
     subsample: int = None,
-    min_depth: int = 0,
 ):
     if sibling_results is None:
         sibling_results = dict()
@@ -246,27 +235,26 @@ def sibling_de(
         sibling_comps,
         data,
         clusters,
-        node_list,
         node_tree,
         cluster_nz_d,
+        cluster_count_d,
         sibling_results,
         delta_nz,
         max_nz_b,
         subsample,
-        min_depth,
     )
 
-    for k in node_list:
-        if len(k) < min_depth or node_tree[k].is_leaf:
+    for k in node_tree:
+        if node_tree[k].is_leaf:
             continue
 
         if len(node_tree[k].children) == 2:
             j = node_tree[k].children[1].node_id
             if j not in sibling_results:
                 i = node_tree[k].children[0].node_id
-                p, nz_diff, nz_filter = sibling_results[i]
+                p, nz_i, nz_j, nz_filter = sibling_results[i]
 
-                sibling_results[j] = p, -nz_diff, nz_filter
+                sibling_results[j] = p, nz_j, nz_i, nz_filter
 
     return sibling_results, len(sibling_results) - n_de
 
@@ -274,14 +262,13 @@ def sibling_de(
 def pairwise_sibling_de(
     data: ArrayLike,
     clusters: np.ndarray,
-    node_list: Sequence[Key],
-    node_tree: Dict[Key, MultiNode],
+    node_tree: NodeTree,
     cluster_nz_d: Dict[Key, np.ndarray],
-    pairwise_results: Dict[Key, Tuple[np.ndarray, ...]] = None,
+    cluster_count_d: Counter[Key],
+    pairwise_results: ResultsDict = None,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
     subsample: int = None,
-    min_depth: int = 0,
 ):
     if pairwise_results is None:
         pairwise_results = dict()
@@ -292,14 +279,13 @@ def pairwise_sibling_de(
         pairwise_comps,
         data,
         clusters,
-        node_list,
         node_tree,
         cluster_nz_d,
+        cluster_count_d,
         pairwise_results,
         delta_nz,
         max_nz_b,
         subsample,
-        min_depth,
     )
 
     return pairwise_results, len(pairwise_results) - n_de
@@ -308,14 +294,13 @@ def pairwise_sibling_de(
 def subtree_de(
     data: ArrayLike,
     clusters: np.ndarray,
-    node_list: Sequence[Key],
-    node_tree: Dict[Key, MultiNode],
+    node_tree: NodeTree,
     cluster_nz_d: Dict[Key, np.ndarray],
-    subtree_results: Dict[Key, Tuple[np.ndarray, ...]] = None,
+    cluster_count_d: Counter[Key],
+    subtree_results: ResultsDict = None,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
     subsample: int = None,
-    min_depth: int = 0,
 ):
     if subtree_results is None:
         subtree_results = dict()
@@ -326,28 +311,24 @@ def subtree_de(
         subtree_comps,
         data,
         clusters,
-        node_list,
         node_tree,
         cluster_nz_d,
+        cluster_count_d,
         subtree_results,
         delta_nz,
         max_nz_b,
         subsample,
-        min_depth,
     )
 
     return subtree_results, len(subtree_results) - n_de
 
 
-def get_de_totals(
-    comp: Key,
-    diff_results: Dict[Key, Tuple[np.ndarray, ...]],
-    min_p: float = -10.0,
-):
+def get_de_totals(comp: Key, diff_results: ResultsDict, min_p: float = -10.0):
     if comp not in diff_results:
         return 0, 0
 
-    p, nz_diff, nz_filter = diff_results[comp]
+    p, nz_i, nz_j, nz_filter = diff_results[comp]
+    nz_diff = nz_i - nz_j
 
     total_a = ((p < min_p) & (nz_diff > 0)).sum()
     total_b = ((p < min_p) & (nz_diff < 0)).sum()
@@ -356,9 +337,8 @@ def get_de_totals(
 
 
 def collapse_tree(
-    node_list: Sequence[Key],
-    node_tree: Dict[Key, MultiNode],
-    sib_results: Dict[Key, Tuple[np.ndarray, ...]],
+    node_tree: NodeTree,
+    sib_results: ResultsDict,
     min_de: int = 5,
     min_p: float = -10.0,
 ):
@@ -367,8 +347,8 @@ def collapse_tree(
     exclude = set()
     new_leaf_list = []
 
-    # assumes node_list is bottom-up. reverse it to start at root
-    for k in node_list[::-1]:
+    # sort by length of key to get top-down ordering
+    for k in sorted(node_tree, key=len):
         if k in exclude:
             continue
 

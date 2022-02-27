@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List
+from collections import defaultdict
+from typing import Counter, Dict, List
 
 from brain_atlas import Key
 
@@ -10,22 +11,26 @@ class MultiNode:
     A ClusterNode-like tree structure that allows for more than two children per node
     """
 
-    def __init__(self, node_id: Key, children: List[MultiNode] = None, count: int = 1):
+    def __init__(
+        self, index: int, node_id: Key, children: List[MultiNode] = None, count: int = 0
+    ):
+        self.index = index
         self.node_id = node_id
         self.children = children
         if self.children is None:
             self.count = count
+            self.node_count = 1
         else:
-            self.count = sum(c.count for c in self.children)
+            self.count = count + sum(c.count for c in self.children)
+            self.node_count = 1 + sum(c.node_count for c in self.children)
 
     @property
     def is_leaf(self):
         return self.children is None
 
     def pre_order(self, include_internal: bool = False, func=(lambda x: x.node_id)):
-        # maximum number of nodes is 2*n, but might be less
         cur_node = [self]
-        cur_node.extend(None for _ in range(2 * self.count - 1))
+        cur_node.extend(None for _ in range(self.node_count))
         visited = set()
 
         k = 0
@@ -53,39 +58,43 @@ class MultiNode:
         return preorder
 
 
-def to_tree(leaf_list: List[Key]):
+NodeTree = Dict[Key, MultiNode]
+
+
+def to_tree(leaf_list: List[Key], node_counts: Counter[Key]) -> NodeTree:
     node_list = leaf_list.copy()
-    node_dict = dict()
-    node_depth = dict()
+    node_tree = dict()
 
     # internal nodes
     all_nodes = {k[:i] for k in leaf_list for i in range(len(k))}
     # this sorts the nodes to be in bottom-up order
     node_list.extend(sorted(all_nodes, key=lambda k: (-len(k), k)))
 
+    node_children = defaultdict(list)
+    for k in node_list[:-1]:
+        node_children[k[:-1]].append(k)
+
     # initialize node objects
     for i, k in enumerate(node_list):
-        if i >= len(leaf_list):
-            node_dict[k] = MultiNode(k, children=[])
+        if i < len(leaf_list):
+            node_tree[k] = MultiNode(i, k, count=node_counts[k])
         else:
-            node_dict[k] = MultiNode(k)
+            children = [node_tree[c_k] for c_k in sorted(node_children[k])]
+            node_tree[k] = MultiNode(i, k, count=node_counts[k], children=children)
 
-    # add up counts and depth, from bottom
-    for k in node_list:
-        if len(k):
-            node_dict[k[:-1]].children.append(node_dict[k])
-            node_dict[k[:-1]].count += node_dict[k].count
+    return node_tree
 
-        if node_dict[k].is_leaf:
+
+def calc_node_depth(node_tree: NodeTree) -> Dict[Key, int]:
+    node_depth = dict()
+
+    # add up depth, from bottom
+    for k in sorted(node_tree, key=lambda key: node_tree[key].index):
+        if node_tree[k].is_leaf:
             node_depth[k] = 0
         else:
             node_depth[k] = (
-                max(node_depth[nd.node_id] for nd in node_dict[k].children) + 1
+                max(node_depth[nd.node_id] for nd in node_tree[k].children) + 1
             )
 
-    # sort the children by node id
-    for k in node_dict:
-        if not node_dict[k].is_leaf:
-            node_dict[k].children.sort(key=lambda nd: nd.node_id)
-
-    return node_list, node_depth, node_dict
+    return node_depth

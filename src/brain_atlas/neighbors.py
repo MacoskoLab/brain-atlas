@@ -245,6 +245,49 @@ def kng_to_jaccard(kng: np.ndarray, min_weight: float = 0.0):
     return edges[edges[:, 2] > min_weight, :]
 
 
+@nb.njit(parallel=True, fastmath=True)
+def kng_to_full_jaccard(kng: np.ndarray, min_weight: float = 0.0):
+    n, m = kng.shape
+
+    # bitpack edges into one int64 so we can remove duplicates
+    kng2 = np.zeros(n * m * m, dtype=np.int64)
+
+    for i in nb.prange(n):
+        # because we have a self-edge, this includes the first-order edges
+        js = np.unique(kng[kng[i, :], :])
+        js_0 = (js[js < i] << 32) | i
+        js_1 = (i << 32) | js[js > i]
+        js = np.hstack((js_0, js_1))
+
+        kng2[i * m * m : i * m * m + js.shape[0]] = js
+
+    # remove duplicates
+    kng2 = np.unique(kng2[kng2 > 0])
+
+    # unpack back into edges
+    pairs = np.empty((kng2.shape[0], 2), dtype=np.int32)
+    pairs[:, 0] = kng2 >> 32
+    pairs[:, 1] = kng2 & 0xFFFFFFFF
+
+    edges = np.empty(pairs.shape[0], dtype=np.float32)
+
+    for ii in nb.prange(pairs.shape[0]):
+        i = pairs[ii, 0]
+        j = pairs[ii, 1]
+
+        overlap = 0
+        for v_i in kng[i, :]:
+            for v_j in kng[j, :]:
+                if v_i == v_j:
+                    overlap += 1
+
+        d = overlap / (2 * m - overlap)
+        edges[ii] = d
+
+    ix = edges > min_weight
+    return pairs[ix, :], edges[ix]
+
+
 def write_edges_to_zarr(
     edges: np.ndarray,
     zarr_path: Union[str, Path],

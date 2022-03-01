@@ -69,7 +69,7 @@ def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
     Removes self-edges. Note: does *not* convert distances to similarity scores
     """
     n, m = kng.shape
-    edges = np.vstack((np.repeat(np.arange(n, dtype=np.int32), m), kng.flatten())).T
+    edges = np.vstack((np.repeat(np.arange(n).astype(np.int32), m), kng.flatten())).T
     weights = np.zeros(n * m, dtype=knd.dtype)
 
     for i in nb.prange(n):
@@ -200,7 +200,7 @@ def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0
     and converts from distance to edge weight (1 - distance). Removes self-edges
     """
     n, m = kng.shape
-    edges = np.vstack((np.repeat(np.arange(n, dtype=np.int32), m), kng.flatten())).T
+    edges = np.vstack((np.repeat(np.arange(n).astype(np.int32), m), kng.flatten())).T
     weights = np.zeros(n * m, dtype=knd.dtype)
 
     for i in nb.prange(n):
@@ -224,7 +224,7 @@ def kng_to_jaccard(kng: np.ndarray, min_weight: float = 0.0):
     Removes self-edges
     """
     n, m = kng.shape
-    edges = np.vstack((np.repeat(np.arange(n, dtype=np.int32), m), kng.flatten())).T
+    edges = np.vstack((np.repeat(np.arange(n).astype(np.int32), m), kng.flatten())).T
     weights = np.zeros(n * m, dtype=np.float32)
 
     for i in nb.prange(n):

@@ -225,7 +225,7 @@ def kng_to_jaccard(kng: np.ndarray, min_weight: float = 0.0):
     """
     n, m = kng.shape
     edges = np.vstack((np.repeat(np.arange(n, dtype=np.int32), m), kng.flatten())).T
-    weights = np.zeros(np.zeros(n * m), dtype=np.float32)
+    weights = np.zeros(n * m, dtype=np.float32)
 
     for i in nb.prange(n):
         kngs = set(kng[i, :])

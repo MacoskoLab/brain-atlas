@@ -93,9 +93,9 @@ def cluster_reduce(
     for i in range(0, n_cells, blocksize):
         log.debug(f"{i} ...")
         cluster_i = clusters[i : i + blocksize]
-        i_data = reduce_fn(data[i : i + blocksize, :])
+        data_i = reduce_fn(data[i : i + blocksize, :])
         for j in np.unique(cluster_i):
-            cluster_arr[j] += i_data[cluster_i == j, :].sum(0)
+            cluster_arr[j] += data_i[cluster_i == j, :].sum(0)
 
     return cluster_arr
 
@@ -170,9 +170,7 @@ def generic_de(
     subsample: int = None,
 ):
     assert cluster_nz.shape[0] == cluster_counts.shape[0]
-    assert np.array_equal(
-        cluster_counts.sum(1).nonzero()[0], cluster_counts.nonzero()[0]
-    )
+    assert np.array_equal(cluster_nz.sum(1).nonzero()[0], cluster_counts.nonzero()[0])
 
     for k in node_tree:
         for comp, c_i, c_j in get_comps(k, node_tree):

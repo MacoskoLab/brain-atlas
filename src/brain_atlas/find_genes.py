@@ -1,7 +1,6 @@
 import itertools
 import logging
-from collections import defaultdict
-from typing import Any, Counter, Dict, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 import dask.array as da
 import numba as nb
@@ -74,29 +73,56 @@ def calc_subsample(n_samples: int, subsample: int):
         return np.sort(np.random.choice(n_samples, size=subsample, replace=False))
 
 
-def cluster_nz_dict(
-    data: da.Array, clusters: np.ndarray, node_tree: NodeTree, blocksize: int = 256000
-):
+def cluster_reduce(
+    reduce_fn,
+    data: da.Array,
+    n_nodes: int,
+    clusters: np.ndarray,
+    blocksize: int = 256000,
+) -> np.ndarray:
     """
-    Calculates the number of nonzero elements per cluster. The values in `clusters` must
-    match the index attributes of the nodes in `node_tree`
+    Generic function to perform some operation on the counts in data and then sum them
+    up per-cluster.
     """
+
     n_cells, n_genes = data.shape
 
-    ix_to_node = {node_tree[k].index: k for k in node_tree}
-    cluster_nz_d = defaultdict(lambda: np.zeros(n_genes, dtype=np.uint32))
+    cluster_arr = np.zeros((n_nodes, n_genes), dtype=np.uint32)
 
-    log.debug("counting nonzero elements")
+    log.debug("counting elements")
     for i in range(0, n_cells, blocksize):
         log.debug(f"{i} ...")
         cluster_i = clusters[i : i + blocksize]
-        data = da.sign(data.counts[i : i + blocksize, :]).compute()
+        i_data = reduce_fn(data[i : i + blocksize, :])
         for j in np.unique(cluster_i):
-            cluster_nz_d[ix_to_node[j]] += data[cluster_i == j, :].sum(0)
+            cluster_arr[j] += i_data[cluster_i == j, :].sum(0)
 
-    cluster_nz_d = dict(cluster_nz_d)
+    return cluster_arr
 
-    return cluster_nz_d
+
+def cluster_nz_arr(
+    data: da.Array, n_nodes: int, clusters: np.ndarray, blocksize: int = 256000
+) -> np.ndarray:
+    """
+    Calculates the number of nonzero elements per cluster. Returns an array with
+    shape (n_nodes, n_genes) where row i corresponds to cluster i
+    """
+
+    def nz_func(d: da.Array):
+        return da.sign(d).compute()
+
+    return cluster_reduce(nz_func, data, n_nodes, clusters, blocksize)
+
+
+def cluster_sum_arr(
+    data: da.Array, n_nodes: int, clusters: np.ndarray, blocksize: int = 256000
+) -> np.ndarray:
+    """
+    Calculates the total gene counts per cluster. Returns an array with
+    shape (n_nodes, n_genes) where row i corresponds to cluster i
+    """
+
+    return cluster_reduce(da.compute, data, n_nodes, clusters, blocksize)
 
 
 def de(
@@ -136,22 +162,17 @@ def generic_de(
     data: ArrayLike,
     clusters: np.ndarray,
     node_tree: NodeTree,
-    cluster_nz_d: Dict[Key, np.ndarray],
-    cluster_count_d: Counter[Key],
+    cluster_nz: np.ndarray,
+    cluster_counts: np.ndarray,
     de_results: ResultsDict,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
     subsample: int = None,
 ):
-    n_nodes = len(node_tree)
-    assert set(cluster_count_d).issubset(node_tree)
-    assert set(cluster_count_d) == set(cluster_nz_d)
-
-    cluster_nz = np.zeros((n_nodes, data.shape[1]))
-    cluster_counts = np.zeros(n_nodes)
-    for k in cluster_nz_d:
-        cluster_nz[node_tree[k].index, :] = cluster_nz_d[k]
-        cluster_counts[node_tree[k].index] = cluster_count_d[k]
+    assert cluster_nz.shape[0] == cluster_counts.shape[0]
+    assert np.array_equal(
+        cluster_counts.sum(1).nonzero()[0], cluster_counts.nonzero()[0]
+    )
 
     for k in node_tree:
         for comp, c_i, c_j in get_comps(k, node_tree):
@@ -219,8 +240,8 @@ def sibling_de(
     data: ArrayLike,
     clusters: np.ndarray,
     node_tree: NodeTree,
-    cluster_nz_d: Dict[Key, np.ndarray],
-    cluster_count_d: Counter[Key],
+    cluster_nz: np.ndarray,
+    cluster_counts: np.ndarray,
     sibling_results: ResultsDict = None,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
@@ -236,8 +257,8 @@ def sibling_de(
         data,
         clusters,
         node_tree,
-        cluster_nz_d,
-        cluster_count_d,
+        cluster_nz,
+        cluster_counts,
         sibling_results,
         delta_nz,
         max_nz_b,
@@ -263,8 +284,8 @@ def pairwise_sibling_de(
     data: ArrayLike,
     clusters: np.ndarray,
     node_tree: NodeTree,
-    cluster_nz_d: Dict[Key, np.ndarray],
-    cluster_count_d: Counter[Key],
+    cluster_nz: np.ndarray,
+    cluster_counts: np.ndarray,
     pairwise_results: ResultsDict = None,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
@@ -280,8 +301,8 @@ def pairwise_sibling_de(
         data,
         clusters,
         node_tree,
-        cluster_nz_d,
-        cluster_count_d,
+        cluster_nz,
+        cluster_counts,
         pairwise_results,
         delta_nz,
         max_nz_b,
@@ -295,8 +316,8 @@ def subtree_de(
     data: ArrayLike,
     clusters: np.ndarray,
     node_tree: NodeTree,
-    cluster_nz_d: Dict[Key, np.ndarray],
-    cluster_count_d: Counter[Key],
+    cluster_nz: np.ndarray,
+    cluster_counts: np.ndarray,
     subtree_results: ResultsDict = None,
     delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
@@ -312,8 +333,8 @@ def subtree_de(
         data,
         clusters,
         node_tree,
-        cluster_nz_d,
-        cluster_count_d,
+        cluster_nz,
+        cluster_counts,
         subtree_results,
         delta_nz,
         max_nz_b,
@@ -337,10 +358,7 @@ def get_de_totals(comp: Key, diff_results: ResultsDict, min_p: float = -10.0):
 
 
 def collapse_tree(
-    node_tree: NodeTree,
-    sib_results: ResultsDict,
-    min_de: int = 5,
-    min_p: float = -10.0,
+    node_tree: NodeTree, sib_results: ResultsDict, min_de: int = 5, min_p: float = -10.0
 ):
     sib_totals = {k: get_de_totals(k, sib_results, min_p=min_p) for k in sib_results}
 

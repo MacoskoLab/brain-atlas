@@ -74,7 +74,7 @@ def to_tree(leaf_list: List[Key], node_counts: Counter[Key]) -> NodeTree:
     for k in node_list[:-1]:
         node_children[k[:-1]].append(k)
 
-    # initialize node objects
+    # initialize node objects from the bottom up
     for i, k in enumerate(node_list):
         if i < len(leaf_list):
             node_tree[k] = MultiNode(i, k, count=node_counts[k])

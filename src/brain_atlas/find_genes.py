@@ -92,9 +92,9 @@ def cluster_nz_dict(
     for i in range(0, n_cells, blocksize):
         log.debug(f"{i} ...")
         cluster_i = clusters[i : i + blocksize]
-        data = da.sign(data.counts[i : i + blocksize, :]).compute()
+        data_i = da.sign(data[i : i + blocksize, :]).compute()
         for j in np.unique(cluster_i):
-            cluster_nz_d[node_list[j]] += data[cluster_i == j, :].sum(0)
+            cluster_nz_d[node_list[j]] += data_i[cluster_i == j, :].sum(0)
 
     cluster_nz_d = dict(cluster_nz_d)
 

@@ -74,15 +74,15 @@ def calc_subsample(n_samples: int, subsample: int):
 
 
 def cluster_reduce(
-    reduce_fn,
+    compute_func,
     data: da.Array,
     n_nodes: int,
     clusters: np.ndarray,
     blocksize: int = 256000,
 ) -> np.ndarray:
     """
-    Generic function to perform some operation on the counts in data and then sum them
-    up per-cluster.
+    Generic function to perform some operation on a count array and then sum up
+    the result per-cluster.
     """
 
     n_cells, n_genes = data.shape
@@ -93,7 +93,7 @@ def cluster_reduce(
     for i in range(0, n_cells, blocksize):
         log.debug(f"{i} ...")
         cluster_i = clusters[i : i + blocksize]
-        data_i = reduce_fn(data[i : i + blocksize, :])
+        data_i = compute_func(data[i : i + blocksize, :])
         for j in np.unique(cluster_i):
             cluster_arr[j] += data_i[cluster_i == j, :].sum(0)
 
@@ -122,7 +122,10 @@ def cluster_sum_arr(
     shape (n_nodes, n_genes) where row i corresponds to cluster i
     """
 
-    return cluster_reduce(da.compute, data, n_nodes, clusters, blocksize)
+    def sum_func(d: da.Array):
+        return da.compute(d)[0]
+
+    return cluster_reduce(sum_func, data, n_nodes, clusters, blocksize)
 
 
 def de(

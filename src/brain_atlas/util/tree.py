@@ -61,9 +61,13 @@ class MultiNode:
 NodeTree = Dict[Key, MultiNode]
 
 
-def to_tree(leaf_list: List[Key], node_counts: Counter[Key]) -> NodeTree:
+def to_tree(leaf_list: List[Key], node_counts: Counter[Key] = None) -> NodeTree:
     node_list = leaf_list.copy()
     node_tree = dict()
+
+    if node_counts is None:
+        # leaf nodes are count 1, everything else 0
+        node_counts = defaultdict(int, {k: 1 for k in leaf_list})
 
     # internal nodes
     all_nodes = {k[:i] for k in leaf_list for i in range(len(k))}

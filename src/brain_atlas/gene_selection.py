@@ -44,9 +44,8 @@ def dask_pblock(counts: ArrayLike, numis: ArrayLike = None, blocksize: int = 128
         exp_pct_nz += exp_pct_nz_b
         var_pct_nz += var_pct_nz_b
 
-    exp_pct_nz = exp_pct_nz.flatten() / n_cells
-    var_pct_nz = var_pct_nz.flatten() / (n_cells * n_cells)
-    std_pct_nz = np.sqrt(var_pct_nz)
+    exp_pct_nz = exp_pct_nz.squeeze() / n_cells
+    std_pct_nz = np.sqrt(var_pct_nz.squeeze()) / n_cells
 
     log.debug("... done")
 

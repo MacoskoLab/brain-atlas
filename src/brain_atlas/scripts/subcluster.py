@@ -222,9 +222,9 @@ def main(
         log.info("Computing edge list via brute-force algo")
         if tree.jaccard:
             log.debug("calculating jaccard scores")
-            edges = neighbors.k_jaccard_edgelist(knn_data, k=k_neighbors + 1)
+            edges, weights = neighbors.k_jaccard_edgelist(knn_data, k=k_neighbors + 1)
         else:
-            edges = neighbors.k_cosine_edgelist(knn_data, k=k_neighbors + 1)
+            edges, weights = neighbors.k_cosine_edgelist(knn_data, k=k_neighbors + 1)
     else:
         if valid_cache and tree.knn.exists():
             log.info(f"Loading cached kNN from {tree.knn}")
@@ -248,18 +248,18 @@ def main(
         if tree.jaccard:
             # compute jaccard on kNN
             log.info("Computing SNN")
-            edges = neighbors.kng_to_jaccard(kng)
+            edges, weights = neighbors.kng_to_jaccard(kng)
         else:
             if knd is None:
                 log.debug(f"Loading kNN distances from {tree.knn}")
                 knd = da.from_zarr(tree.knn, "knd").compute()
 
             log.info("Creating edge list")
-            edges = neighbors.kng_to_edgelist(kng, 1 - knd)
+            edges, weights = neighbors.kng_to_edgelist(kng, 1 - knd)
 
     # create igraph from edge list
     log.info(f"Building graph with {edges.shape[0]} edges")
-    graph = ig.Graph(n=n_cells, edges=edges[:, :2], edge_attrs={"weight": edges[:, 2]})
+    graph = ig.Graph(n=n_cells, edges=edges, edge_attrs={"weight": weights})
 
     if high_res:
         bs = range(1, 10)

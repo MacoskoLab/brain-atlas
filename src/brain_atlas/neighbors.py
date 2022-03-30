@@ -69,22 +69,24 @@ def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
     Removes self-edges. Note: does *not* convert distances to similarity scores
     """
     n, m = kng.shape
-    edges = np.vstack((np.repeat(np.arange(n), m), kng.flatten(), np.zeros(n * m))).T
+    edges = np.vstack((np.repeat(np.arange(n).astype(np.int32), m), kng.flatten())).T
+    weights = np.zeros(n * m, dtype=knd.dtype)
 
     for i in nb.prange(n):
         for jj, j in enumerate(kng[i, :]):
             if i < j:
                 # this edge is fine
-                edges[i * m + jj, 2] = knd[i, jj]
+                weights[i * m + jj] = knd[i, jj]
             elif i > j:
                 for k in kng[j, :]:
                     if i == k:
                         # this is already included on the other end
                         break
                 else:
-                    edges[i * m + jj, 2] = knd[i, jj]
+                    weights[i * m + jj] = knd[i, jj]
 
-    return edges[edges[:, 2] > min_weight, :]
+    ix = weights > min_weight
+    return edges[ix, :], weights[ix]
 
 
 @nb.njit(fastmath=True)
@@ -136,17 +138,19 @@ def cosine_edgelist(data: np.ndarray, min_weight: float = 0.0):
     dist = full_cosine_similarity(data)
 
     nc2 = n * (n - 1) // 2
-    edges = np.empty((nc2, 3), dtype=np.float64)
+    edges = np.empty((nc2, 2), dtype=np.int32)
+    weights = np.zeros(nc2, dtype=np.float64)
 
     for i in nb.prange(n - 1):
         nic2 = (n - i) * (n - i - 1) // 2
         for j in range(i + 1, n):
-            ix = nc2 - nic2 + (j - i - 1)
-            edges[ix, 0] = i
-            edges[ix, 1] = j
-            edges[ix, 2] = dist[i, j]
+            k = nc2 - nic2 + (j - i - 1)
+            edges[k, 0] = i
+            edges[k, 1] = j
+            weights[k] = dist[i, j]
 
-    return edges[edges[:, 2] > min_weight, :]
+    ix = weights > min_weight
+    return edges[ix, :], weights[ix]
 
 
 @nb.njit(parallel=True, fastmath=True)
@@ -196,7 +200,8 @@ def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0
     and converts from distance to edge weight (1 - distance). Removes self-edges
     """
     n, m = kng.shape
-    edges = np.vstack((np.repeat(np.arange(n), m), kng.flatten(), np.zeros(n * m))).T
+    edges = np.vstack((np.repeat(np.arange(n).astype(np.int32), m), kng.flatten())).T
+    weights = np.zeros(n * m, dtype=knd.dtype)
 
     for i in nb.prange(n):
         for jj, j in enumerate(kng[i, :]):
@@ -205,10 +210,11 @@ def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0
                 continue
             for k in kng[j, :]:
                 if i == k:
-                    edges[i * m + jj, 2] = 1 - knd[i, jj]
+                    weights[i * m + jj] = 1 - knd[i, jj]
                     break
 
-    return edges[edges[:, 2] > min_weight, :]
+    ix = weights > min_weight
+    return edges[ix, :], weights[ix]
 
 
 @nb.njit(parallel=True, fastmath=True)
@@ -218,7 +224,8 @@ def kng_to_jaccard(kng: np.ndarray, min_weight: float = 0.0):
     Removes self-edges
     """
     n, m = kng.shape
-    edges = np.vstack((np.repeat(np.arange(n), m), kng.flatten(), np.zeros(n * m))).T
+    edges = np.vstack((np.repeat(np.arange(n).astype(np.int32), m), kng.flatten())).T
+    weights = np.zeros(n * m, dtype=np.float32)
 
     for i in nb.prange(n):
         kngs = set(kng[i, :])
@@ -240,26 +247,71 @@ def kng_to_jaccard(kng: np.ndarray, min_weight: float = 0.0):
 
             if not skip:
                 d = overlap / (2 * m - overlap)
-                edges[i * m + jj, 2] = d
+                weights[i * m + jj] = d
 
-    return edges[edges[:, 2] > min_weight, :]
+    ix = weights > min_weight
+    return edges[ix, :], weights[ix]
+
+
+@nb.njit(parallel=True, fastmath=True)
+def kng_to_full_jaccard(kng: np.ndarray, min_weight: float = 0.0):
+    n, m = kng.shape
+
+    # bitpack edges into one int64 so we can remove duplicates
+    kng2 = np.zeros(n * m * m, dtype=np.int64)
+
+    for i in nb.prange(n):
+        # because we have a self-edge, this includes the first-order edges
+        js = np.unique(kng[kng[i, :], :])
+        js_0 = (js[js < i] << 32) | i
+        js_1 = (i << 32) | js[js > i]
+        js = np.hstack((js_0, js_1))
+
+        kng2[i * m * m : i * m * m + js.shape[0]] = js
+
+    # remove duplicates
+    kng2 = np.unique(kng2[kng2 > 0])
+
+    # unpack back into edges
+    edges = np.empty((kng2.shape[0], 2), dtype=np.int32)
+    edges[:, 0] = kng2 >> 32
+    edges[:, 1] = kng2 & 0xFFFFFFFF
+
+    weights = np.empty(edges.shape[0], dtype=np.float32)
+
+    for ii in nb.prange(edges.shape[0]):
+        i = edges[ii, 0]
+        j = edges[ii, 1]
+
+        overlap = 0
+        for v_i in kng[i, :]:
+            for v_j in kng[j, :]:
+                if v_i == v_j:
+                    overlap += 1
+
+        d = overlap / (2 * m - overlap)
+        weights[ii] = d
+
+    ix = weights > min_weight
+    return edges[ix, :], weights[ix]
 
 
 def write_edges_to_zarr(
     edges: np.ndarray,
+    weights: np.ndarray,
     zarr_path: Union[str, Path],
     chunk_rows: int = 100000,
     overwrite: bool = False,
 ):
     log.debug(f"Writing edges to {zarr_path}/edges")
-    da.array(edges[:, :2].astype(np.int32)).rechunk((chunk_rows, 2)).to_zarr(
+    da.array(edges.astype(np.int32)).rechunk((chunk_rows, 2)).to_zarr(
         zarr_path,
         "edges",
         overwrite=overwrite,
         compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
     )
     log.debug(f"Writing edge weights to {zarr_path}/weights")
-    da.array(edges[:, 2]).rechunk((chunk_rows,)).to_zarr(
+    da.array(weights).rechunk((chunk_rows,)).to_zarr(
         zarr_path,
         "weights",
         overwrite=overwrite,

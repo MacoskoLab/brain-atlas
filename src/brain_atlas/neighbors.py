@@ -39,29 +39,6 @@ def translate_kng(node_subset: np.ndarray, kng: np.ndarray):
     return new_kng
 
 
-def write_knn_to_zarr(
-    kng: np.ndarray,
-    knd: np.ndarray,
-    zarr_path: Union[str, Path],
-    chunk_rows: int = 100000,
-    overwrite: bool = False,
-):
-    log.debug(f"Writing neighbor graph to {zarr_path}/kng")
-    da.array(kng.astype(np.int32)).rechunk((chunk_rows, kng.shape[1])).to_zarr(
-        zarr_path,
-        "kng",
-        overwrite=overwrite,
-        compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
-    )
-    log.debug(f"Writing edge distances to {zarr_path}/knd")
-    da.array(knd).rechunk((chunk_rows, knd.shape[1])).to_zarr(
-        zarr_path,
-        "knd",
-        overwrite=overwrite,
-        compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
-    )
-
-
 @nb.njit(parallel=True, fastmath=True)
 def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
     """
@@ -91,10 +68,13 @@ def kng_to_edgelist(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0.0):
 
 @nb.njit(fastmath=True)
 def cosine_similarity(u: np.ndarray, v: np.ndarray):
+    """
+    Compute the cosine similarity (not distance) of two vectors
+    """
     m = u.shape[0]
-    udotv = 0
-    u_norm = 0
-    v_norm = 0
+    udotv = 0.0
+    u_norm = 0.0
+    v_norm = 0.0
     for i in range(m):
         udotv += u[i] * v[i]
         u_norm += u[i] * u[i]
@@ -220,8 +200,8 @@ def compute_mutual_edges(kng: np.ndarray, knd: np.ndarray, min_weight: float = 0
 @nb.njit(parallel=True, fastmath=True)
 def kng_to_jaccard(kng: np.ndarray, min_weight: float = 0.0):
     """
-    Takes the knn graph and computes jaccard shared-nearest-neighbor edges and weights.
-    Removes self-edges
+    Takes the knn graph and computes jaccard shared-nearest-neighbor edges and weights
+    for all neighbors. Removes self-edges.
     """
     n, m = kng.shape
     edges = np.vstack((np.repeat(np.arange(n).astype(np.int32), m), kng.flatten())).T
@@ -255,6 +235,11 @@ def kng_to_jaccard(kng: np.ndarray, min_weight: float = 0.0):
 
 @nb.njit(parallel=True, fastmath=True)
 def kng_to_full_jaccard(kng: np.ndarray, min_weight: float = 0.0):
+    """
+    Takes the knn graph and computes jaccard shared-nearest-neighbor edges and weights
+    for all neighbors of neighbors, which approaches the complete SNN graph. Removes
+    self-edges.
+    """
     n, m = kng.shape
 
     # bitpack edges into one int64 so we can remove duplicates
@@ -296,6 +281,32 @@ def kng_to_full_jaccard(kng: np.ndarray, min_weight: float = 0.0):
     return edges[ix, :], weights[ix]
 
 
+def write_knn_to_zarr(
+    kng: np.ndarray,
+    knd: np.ndarray,
+    zarr_path: Union[str, Path],
+    chunk_rows: int = 100000,
+    overwrite: bool = False,
+):
+    """
+    Writes kNN graph and distances to disk as zarr files
+    """
+    log.debug(f"Writing neighbor graph to {zarr_path}/kng")
+    da.array(kng.astype(np.int32)).rechunk((chunk_rows, kng.shape[1])).to_zarr(
+        zarr_path,
+        "kng",
+        overwrite=overwrite,
+        compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
+    )
+    log.debug(f"Writing edge distances to {zarr_path}/knd")
+    da.array(knd).rechunk((chunk_rows, knd.shape[1])).to_zarr(
+        zarr_path,
+        "knd",
+        overwrite=overwrite,
+        compressor=Blosc(cname="lz4hc", clevel=9, shuffle=Blosc.AUTOSHUFFLE),
+    )
+
+
 def write_edges_to_zarr(
     edges: np.ndarray,
     weights: np.ndarray,
@@ -303,6 +314,9 @@ def write_edges_to_zarr(
     chunk_rows: int = 100000,
     overwrite: bool = False,
 ):
+    """
+    Writes edge and weight arrays to disk as zarr files
+    """
     log.debug(f"Writing edges to {zarr_path}/edges")
     da.array(edges.astype(np.int32)).rechunk((chunk_rows, 2)).to_zarr(
         zarr_path,

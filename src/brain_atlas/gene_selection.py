@@ -25,8 +25,8 @@ def dask_pblock(counts: ArrayLike, numis: ArrayLike = None, blocksize: int = 128
     if numis is None:
         numis = counts.sum(1, keepdims=True)
 
-    exp_pct_nz = np.zeros(exp.shape)  # 1 x n_genes
-    var_pct_nz = np.zeros(exp.shape)  # 1 x n_genes
+    exp_nz = np.zeros(exp.shape)  # 1 x n_genes
+    var_nz = np.zeros(exp.shape)  # 1 x n_genes
 
     log.debug("computing expected percent nonzero")
     # run in chunks (still large, but seems easier for dask to handle)
@@ -36,24 +36,21 @@ def dask_pblock(counts: ArrayLike, numis: ArrayLike = None, blocksize: int = 128
 
         prob_zero = np.exp(-exp.T.dot(numis[i : i + blocksize, :].T))  # n_genes x b
 
-        exp_pct_nz_b = (1 - prob_zero).sum(1)  # n_genes
-        var_pct_nz_b = (prob_zero * (1 - prob_zero)).sum(1)
+        exp_nz_b = (1 - prob_zero).sum(1)  # n_genes
+        var_nz_b = (prob_zero * (1 - prob_zero)).sum(1)
 
-        exp_pct_nz_b, var_pct_nz_b = da.compute(exp_pct_nz_b, var_pct_nz_b)
+        exp_nz_b, var_nz_b = da.compute(exp_nz_b, var_nz_b)
 
-        exp_pct_nz += exp_pct_nz_b
-        var_pct_nz += var_pct_nz_b
+        exp_nz += exp_nz_b
+        var_nz += var_nz_b
 
-    exp_pct_nz = exp_pct_nz.flatten() / n_cells
-    var_pct_nz = var_pct_nz.flatten() / (n_cells * n_cells)
-    std_pct_nz = np.sqrt(var_pct_nz)
+    exp_nz = exp_nz.squeeze() / n_cells
+    std_nz = np.sqrt(var_nz.squeeze()) / n_cells
 
     log.debug("... done")
 
     exp_p = np.zeros_like(pct)
-    ix = (std_pct_nz != 0).flatten()
-    exp_p[ix] = scipy.stats.norm.logcdf(
-        pct[ix], loc=exp_pct_nz[ix], scale=std_pct_nz[ix]
-    )
+    ix = (std_nz != 0).flatten()
+    exp_p[ix] = scipy.stats.norm.logcdf(pct[ix], loc=exp_nz[ix], scale=std_nz[ix])
 
-    return exp_pct_nz, pct, exp_p
+    return exp_nz, pct, exp_p

@@ -62,7 +62,7 @@ NodeTree = Dict[Key, MultiNode]
 
 
 def to_tree(leaf_list: List[Key], node_counts: Counter[Key] = None) -> NodeTree:
-    node_list = leaf_list.copy()
+    node_list = sorted(leaf_list)
     node_tree = dict()
 
     if node_counts is None:

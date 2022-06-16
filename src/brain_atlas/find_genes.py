@@ -1,6 +1,6 @@
 import itertools
 import logging
-from typing import Any, Dict, Tuple, Union
+from typing import Dict, Hashable, Tuple, Union
 
 import dask.array as da
 import numba as nb
@@ -13,7 +13,8 @@ from brain_atlas.util.tree import NodeTree
 log = logging.getLogger(__name__)
 
 ArrayLike = Union[np.ndarray, da.Array]
-ResultsDict = Dict[Any, Tuple[np.ndarray, ...]]
+DiffExpResult = Tuple[np.ndarray, ...]
+ResultsDict = Dict[Hashable, DiffExpResult]
 
 
 @nb.njit
@@ -345,23 +346,56 @@ def subtree_de(
     return subtree_results, len(subtree_results) - n_de
 
 
-def get_de_totals(comp: Key, diff_results: ResultsDict, min_p: float = -10.0):
-    if comp not in diff_results:
-        return 0, 0
+def filter_res(de_res: DiffExpResult, max_p: float, max_nz_b: float):
+    """
+    Refilter a DE result with a maximum p-value and max nz% for the lower side
+    """
+    p, nz_1, nz_2, nzf = de_res
+    nzd = nz_1 - nz_2
 
-    p, nz_i, nz_j, nz_filter = diff_results[comp]
-    nz_diff = nz_i - nz_j
+    min_nz = np.minimum(nz_1, nz_2)
+    nzf_2 = min_nz < max_nz_b
+    assert not np.any(nzf < nzf_2), "New nz% filter has a larger gene selection"
 
-    total_a = ((p < min_p) & (nz_diff > 0)).sum()
-    total_b = ((p < min_p) & (nz_diff < 0)).sum()
+    nzf = nzf & (p < max_p) & nzf_2
 
-    return total_a, total_b
+    return nzf, nzd
+
+
+def get_de_count(de_res: DiffExpResult, max_p: float = -10.0, max_nz_b: float = 0.2):
+    """
+    Retrieves the number of DE genes (in each direction) for a given DE result
+    """
+    nzf, nzd = filter_res(de_res, max_p, max_nz_b)
+
+    return (nzd[nzf] > 0).sum(), (nzd[nzf] < 0).sum()
+
+
+def get_gene_lists(
+    de_res: DiffExpResult,
+    gene_list: list,
+    top_n: int = 20,
+    max_p: float = -10.0,
+    max_nz_b: float = 0.2,
+):
+    """
+    Retrieves the top genes for a given DE result by indexing
+    into a list of names or ids
+    """
+
+    nzf, nzd = filter_res(de_res, max_p, max_nz_b)
+    nz_genes = sorted(np.nonzero(nzf)[0], key=lambda i: nzd[i])
+
+    group_a = [gene_list[i] for i in nz_genes[: -(top_n + 1) : -1] if nzd[i] > 0]
+    group_b = [gene_list[i] for i in nz_genes[:top_n] if nzd[i] < 0]
+
+    return group_a, group_b
 
 
 def collapse_tree(
-    node_tree: NodeTree, sib_results: ResultsDict, min_de: int = 5, min_p: float = -10.0
+    node_tree: NodeTree, sib_results: ResultsDict, min_de: int = 5, max_p: float = -10.0
 ):
-    sib_totals = {k: get_de_totals(k, sib_results, min_p=min_p) for k in sib_results}
+    sib_totals = {k: get_de_count(sib_results[k], max_p=max_p) for k in sib_results}
 
     exclude = set()
     new_leaf_list = []

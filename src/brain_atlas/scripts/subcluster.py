@@ -12,6 +12,7 @@ from numcodecs import Blosc
 from pynndescent import NNDescent
 
 import brain_atlas.neighbors as neighbors
+from brain_atlas.diff_exp import spearmanr
 from brain_atlas.gene_selection import dask_pblock
 from brain_atlas.leiden import leiden_sweep
 from brain_atlas.leiden_tree import LeidenTree
@@ -73,6 +74,13 @@ log = logging.getLogger(__name__)
     default=40000,
     help="Threshold for using in-memory/brute-force algorithms",
 )
+@click.option("--gene-filter", type=int, default=None, help="Gene index to filter on")
+@click.option(
+    "--filter-threshold",
+    type=float,
+    default=0.2,
+    help="Spearman correlation threshold for gene filter, if used",
+)
 def main(
     root_path: Path,
     level: Sequence[int],
@@ -90,6 +98,8 @@ def main(
     high_res: bool = False,
     output_dir: Path = None,
     max_array_size: int = 40000,
+    gene_filter: int = None,
+    filter_threshold: float = 0.2,
 ):
     """
     Subclusters LEVEL of the ROOT_PATH Leiden tree, performing a sweep across
@@ -161,19 +171,18 @@ def main(
     else:
         exp_pct_nz, pct, ds_p = dask_pblock(d_i, numis=n_i)
 
-        selected_genes = ((exp_pct_nz - pct > min_gene_diff) & (ds_p < -5)).nonzero()[0]
+        selected_genes = (exp_pct_nz - pct > min_gene_diff) & (ds_p < -5)
+        if gene_filter is not None:
+            # ensure that the gene filter is included so we can correlate
+            selected_genes[gene_filter] = True
+        selected_genes = selected_genes.nonzero()[0]
+
         n_genes = selected_genes.shape[0]
 
         # save output
         log.info(f"Selected {n_genes} genes")
         log.debug(f"saving to {tree.selected_genes}")
-        np.savez_compressed(
-            tree.selected_genes,
-            exp_pct_nz=exp_pct_nz,
-            pct=pct,
-            ds_p=ds_p,
-            selected_genes=selected_genes,
-        )
+        np.savez_compressed(tree.selected_genes, selected_genes=selected_genes)
 
     # subselect genes
     with dask.config.set(**{"array.slicing.split_large_chunks": False}):
@@ -181,11 +190,32 @@ def main(
         if isinstance(d_i_mem, da.Array):
             d_i_mem = d_i_mem.rechunk((2000, n_genes))
 
+    if gene_filter is not None:
+        # make sure our selected gene is included
+        assert (selected_genes == gene_filter).sum() == 1, "filter gene is not present"
+
+        # need to compute spearmanr across all genes, so we load the data
+        # into memory here
+        if isinstance(d_i_mem, da.Array):
+            d_i_mem = d_i_mem.compute()
+
+        r, logp = spearmanr(d_i_mem)
+
+        # index of filter gene has shifted due to gene selection
+        ix = np.argmax(selected_genes == gene_filter)
+        r = r[ix, :]
+        logp = logp[ix, :]
+
+        d_i_mem = d_i_mem[:, ~((r >= filter_threshold) & (logp < -5))]
+        n_genes = d_i_mem.shape[1]
+
+        log.info(f"Filtered to {n_genes} genes")
+
     if scaled:
         d_i_mem = d_i_mem / np.std(d_i_mem, axis=0, keepdims=True)
 
     if tree.n_pcs is None:
-        # NNDescent will convert this to a numpy array
+        # NNDescent will convert to a numpy array if needed
         knn_data = d_i_mem
         knn_metric = "cosine"
     else:

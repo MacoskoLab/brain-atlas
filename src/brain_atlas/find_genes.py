@@ -393,9 +393,16 @@ def get_gene_lists(
 
 
 def collapse_tree(
-    node_tree: NodeTree, sib_results: ResultsDict, min_de: int = 5, max_p: float = -10.0
+    node_tree: NodeTree,
+    sib_results: ResultsDict,
+    min_de: int = 5,
+    max_p: float = -10.0,
+    max_nz_b: float = 0.2,
 ):
-    sib_totals = {k: get_de_count(sib_results[k], max_p=max_p) for k in sib_results}
+    sib_totals = {
+        k: get_de_count(sib_results[k], max_p=max_p, max_nz_b=max_nz_b)
+        for k in sib_results
+    }
 
     exclude = set()
     new_leaf_list = []

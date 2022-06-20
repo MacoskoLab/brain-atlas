@@ -53,18 +53,10 @@ def calc_nz(
 
 
 @nb.njit
-def calc_filter(
-    cluster_counts: np.ndarray,
-    cluster_nz: np.ndarray,
-    group1: np.ndarray,
-    group2: np.ndarray,
-    max_nz_b: float,
-    delta_nz: float,
-):
-    nz_1, nz_2 = calc_nz(cluster_counts, cluster_nz, group1, group2)
+def calc_filter(nz_1: np.ndarray, nz_2: np.ndarray, max_nz_b: float, delta_nz: float):
     nz_filter = (np.minimum(nz_1, nz_2) < max_nz_b) & (np.abs(nz_1 - nz_2) > delta_nz)
 
-    return nz_1, nz_2, nz_filter
+    return nz_filter
 
 
 def calc_subsample(n_samples: int, subsample: int):
@@ -182,9 +174,8 @@ def generic_de(
                 continue
 
             log.debug(f"Comparing {c_i} with {c_j}")
-            nz_i, nz_j, nz_filter = calc_filter(
-                cluster_counts, cluster_nz, c_i, c_j, max_nz_b, delta_nz
-            )
+            nz_i, nz_j = calc_nz(cluster_counts, cluster_nz, c_i, c_j)
+            nz_filter = calc_filter(nz_i, nz_j, max_nz_b, delta_nz)
 
             _, p = de(data, clusters, c_i, c_j, nz_filter, subsample)
             de_results[comp] = p, nz_i, nz_j, nz_filter
@@ -346,27 +337,31 @@ def subtree_de(
     return subtree_results, len(subtree_results) - n_de
 
 
-def filter_res(de_res: DiffExpResult, max_p: float, max_nz_b: float):
+def filter_res(de_res: DiffExpResult, max_p: float, delta_nz: float, max_nz_b: float):
     """
-    Refilter a DE result with a maximum p-value and max nz% for the lower side
+    Refilter a DE result with new thresholds. Error if the new filter is wider than the old
     """
     p, nz_1, nz_2, nzf = de_res
     nzd = nz_1 - nz_2
 
-    min_nz = np.minimum(nz_1, nz_2)
-    nzf_2 = min_nz < max_nz_b
-    assert not np.any(nzf < nzf_2), "New nz% filter has a larger gene selection"
+    new_nzf = calc_filter(nz_1, nz_2, delta_nz, max_nz_b)
+    assert not np.any(nzf < new_nzf), "New nz filter has a larger gene selection"
 
-    nzf = nzf & (p < max_p) & nzf_2
+    new_nzf &= p < max_p
 
-    return nzf, nzd
+    return new_nzf, nzd
 
 
-def get_de_count(de_res: DiffExpResult, max_p: float = -10.0, max_nz_b: float = 0.2):
+def get_de_count(
+    de_res: DiffExpResult,
+    max_p: float = -10.0,
+    delta_nz: float = 0.2,
+    max_nz_b: float = 0.2,
+):
     """
     Retrieves the number of DE genes (in each direction) for a given DE result
     """
-    nzf, nzd = filter_res(de_res, max_p, max_nz_b)
+    nzf, nzd = filter_res(de_res, max_p, delta_nz, max_nz_b)
 
     return (nzd[nzf] > 0).sum(), (nzd[nzf] < 0).sum()
 
@@ -376,6 +371,7 @@ def get_gene_lists(
     gene_list: list,
     top_n: int = 20,
     max_p: float = -10.0,
+    delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
 ):
     """
@@ -383,7 +379,7 @@ def get_gene_lists(
     into a list of names or ids
     """
 
-    nzf, nzd = filter_res(de_res, max_p, max_nz_b)
+    nzf, nzd = filter_res(de_res, max_p, delta_nz, max_nz_b)
     nz_genes = sorted(np.nonzero(nzf)[0], key=lambda i: nzd[i])
 
     group_a = [gene_list[i] for i in nz_genes[: -(top_n + 1) : -1] if nzd[i] > 0]

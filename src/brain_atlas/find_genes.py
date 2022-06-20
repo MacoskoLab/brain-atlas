@@ -53,7 +53,9 @@ def calc_nz(
 
 
 @nb.njit
-def calc_filter(nz_1: np.ndarray, nz_2: np.ndarray, max_nz_b: float, delta_nz: float):
+def calc_filter(
+    nz_1: np.ndarray, nz_2: np.ndarray, *, delta_nz: float, max_nz_b: float
+):
     nz_filter = (np.minimum(nz_1, nz_2) < max_nz_b) & (np.abs(nz_1 - nz_2) > delta_nz)
 
     return nz_filter
@@ -175,7 +177,7 @@ def generic_de(
 
             log.debug(f"Comparing {c_i} with {c_j}")
             nz_i, nz_j = calc_nz(cluster_counts, cluster_nz, c_i, c_j)
-            nz_filter = calc_filter(nz_i, nz_j, max_nz_b, delta_nz)
+            nz_filter = calc_filter(nz_i, nz_j, delta_nz=delta_nz, max_nz_b=max_nz_b)
 
             _, p = de(data, clusters, c_i, c_j, nz_filter, subsample)
             de_results[comp] = p, nz_i, nz_j, nz_filter
@@ -344,7 +346,7 @@ def filter_res(de_res: DiffExpResult, max_p: float, delta_nz: float, max_nz_b: f
     p, nz_1, nz_2, nzf = de_res
     nzd = nz_1 - nz_2
 
-    new_nzf = calc_filter(nz_1, nz_2, delta_nz, max_nz_b)
+    new_nzf = calc_filter(nz_1, nz_2, delta_nz=delta_nz, max_nz_b=max_nz_b)
     assert not np.any(nzf < new_nzf), "New nz filter has a larger gene selection"
 
     new_nzf &= p < max_p
@@ -361,7 +363,7 @@ def get_de_count(
     """
     Retrieves the number of DE genes (in each direction) for a given DE result
     """
-    nzf, nzd = filter_res(de_res, max_p, delta_nz, max_nz_b)
+    nzf, nzd = filter_res(de_res, max_p=max_p, delta_nz=delta_nz, max_nz_b=max_nz_b)
 
     return (nzd[nzf] > 0).sum(), (nzd[nzf] < 0).sum()
 
@@ -379,7 +381,7 @@ def get_gene_lists(
     into a list of names or ids
     """
 
-    nzf, nzd = filter_res(de_res, max_p, delta_nz, max_nz_b)
+    nzf, nzd = filter_res(de_res, max_p=max_p, delta_nz=delta_nz, max_nz_b=max_nz_b)
     nz_genes = sorted(np.nonzero(nzf)[0], key=lambda i: nzd[i])
 
     group_a = [gene_list[i] for i in nz_genes[: -(top_n + 1) : -1] if nzd[i] > 0]
@@ -393,10 +395,13 @@ def collapse_tree(
     sib_results: ResultsDict,
     min_de: int = 5,
     max_p: float = -10.0,
+    delta_nz: float = 0.2,
     max_nz_b: float = 0.2,
 ):
     sib_totals = {
-        k: get_de_count(sib_results[k], max_p=max_p, max_nz_b=max_nz_b)
+        k: get_de_count(
+            sib_results[k], max_p=max_p, delta_nz=delta_nz, max_nz_b=max_nz_b
+        )
         for k in sib_results
     }
 

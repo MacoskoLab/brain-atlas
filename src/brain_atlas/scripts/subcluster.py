@@ -194,12 +194,20 @@ def main(
         # make sure our selected gene is included
         assert (selected_genes == gene_filter).sum() == 1, "filter gene is not present"
 
-        # need to compute spearmanr across all genes, so we load the data
-        # into memory here
-        if isinstance(d_i_mem, da.Array):
-            d_i_mem = d_i_mem.compute()
+        # need to compute spearmanr across all genes
 
-        r, logp = spearmanr(d_i_mem)
+        # subsample to max 1e5 cells
+        if n_cells <= 100000:
+            d_ix = np.arange(n_cells)
+        else:
+            d_ix = np.sort(np.random.choice(n_cells, size=100000, replace=False))
+
+        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+            d_i_subsample = d_i_mem[d_ix, :]
+            if isinstance(d_i_subsample, da.Array):
+                d_i_subsample = d_i_subsample.compute()
+
+        r, logp = spearmanr(d_i_subsample)
 
         # index of filter gene has shifted due to gene selection
         ix = np.argmax(selected_genes == gene_filter)

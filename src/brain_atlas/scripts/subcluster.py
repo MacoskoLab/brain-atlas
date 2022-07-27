@@ -214,7 +214,9 @@ def main(
         r = r[ix, :]
         logp = logp[ix, :]
 
-        d_i_mem = d_i_mem[:, ~((r >= filter_threshold) & (logp < -5))]
+        with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+            d_i_mem = d_i_mem[:, ~((r >= filter_threshold) & (logp < -5))]
+
         n_genes = d_i_mem.shape[1]
 
         log.info(f"Filtered to {n_genes} genes")

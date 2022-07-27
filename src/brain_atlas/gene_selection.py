@@ -16,10 +16,11 @@ def dask_pblock(counts: ArrayLike, numis: ArrayLike = None, blocksize: int = 128
 
     # pre-compute these values
     log.debug("computing percent nonzero per gene")
-    pct = da.compute((counts > 0).sum(0) / n_cells)[0]
+    pct = da.compute(np.sign(counts).sum(0))[0]
+    pct = pct / n_cells
 
     log.debug("computing average expression per gene")
-    exp = counts.sum(0, keepdims=True)
+    exp = da.compute(counts.sum(0, keepdims=True))[0]  # 1 x n_genes
     exp = exp / exp.sum()
 
     if numis is None:
@@ -34,12 +35,11 @@ def dask_pblock(counts: ArrayLike, numis: ArrayLike = None, blocksize: int = 128
         if i % (blocksize * 10) == 0:
             log.debug(f"{i} ...")
 
-        prob_zero = np.exp(-exp.T.dot(numis[i : i + blocksize, :].T))  # n_genes x b
+        numis_t = da.compute(numis[i : i + blocksize, :])[0].T
+        prob_zero = np.exp(-exp.T.dot(numis_t))  # n_genes x b
 
         exp_nz_b = (1 - prob_zero).sum(1)  # n_genes
         var_nz_b = (prob_zero * (1 - prob_zero)).sum(1)
-
-        exp_nz_b, var_nz_b = da.compute(exp_nz_b, var_nz_b)
 
         exp_nz += exp_nz_b
         var_nz += var_nz_b

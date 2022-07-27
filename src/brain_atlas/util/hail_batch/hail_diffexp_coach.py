@@ -19,8 +19,13 @@ b = hb.Batch(backend=backend,
              name='atlasdiffexp',
              # See docker image, need to upload to gcr
              default_image="gcr.io/mouse-brain-atlas/jonahatlas:latest",
+             # Uses the N1 set of machines. So highmem N1 gives ~7 GB memory per
+             # core. If you ask for more memory per core, will just bump up the
+             # CPU number (look in hail batch for 'actual' vs 'requested' mem). So to make sure always 2cores highmem, requested 12.5G
              default_memory="12.5Gi",
+             # Powers of 2 starting from 1/2. 4 seemed unecessary
              default_cpu=2,
+             #  Min 10GB per instance but can ask for more 
              default_storage='9Gi',
              # 18k = 5 hours. Just in case a job hangs or something, can be NULL=inf=24 hour preemtible
              default_timeout=18000, #sec

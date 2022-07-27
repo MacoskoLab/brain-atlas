@@ -1,0 +1,24 @@
+# Providence of files
+
+gene_list.txt
+atlas_500umis_mt-1pct_cells.txt.gz
+	From james
+
+hail_diffexp_runner.py
+
+cluster_count_arr.pickle
+	https://github.com/MacoskoLab/RCTD-Mapping-Underway/blob/7b34187beccc308e90b7b546ed2b0eb2e7c7e5d0/03%20Zeng%20Data/10_MBASS/differential_expression_example.py#L333
+	`cluster_count_arr = np.array([cluster_counts[i] for i in range(len(node_list))])`
+
+cluster_nz_arr.pickle
+	https://github.com/MacoskoLab/RCTD-Mapping-Underway/blob/b651f06b1d31094c60436522985e5762fefc7694/03%20Zeng%20Data/10_MBASS/differential_expression_example.py#L381
+	`cluster_nz_arr[node_tree[k].index, :] += cluster_nz[k]`
+
+clusters.pickle
+	https://github.com/MacoskoLab/RCTD-Mapping-Underway/blob/7b34187beccc308e90b7b546ed2b0eb2e7c7e5d0/03%20Zeng%20Data/10_MBASS/differential_expression_example.py#L329
+	`clusters = np.array([node_tree[k].index for k in full_key_array])`	
+
+
+
+# Upload code
+gsutil -m rsync . gs://macosko_data/jlanglie/hail_MBASS_files/

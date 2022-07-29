@@ -1,0 +1,20 @@
+FROM mambaorg/micromamba:0.24.0
+
+COPY . /brain-atlas
+
+RUN cd /brain-atlas \
+       && micromamba install -n base -y -f hail_environment.yml \
+       && micromamba clean --all --yes
+
+# need to install protobuf manually bc broken for some reason
+# https://github.com/spesmilo/electrum/issues/7825
+ARG MAMBA_DOCKERFILE_ACTIVATE=1
+
+# hail batch fails internally if not run as root, seems to work fine with conda
+USER root
+
+# Useful commands
+#     sudo docker build -t atlas .
+#     sudo docker run --rm -ti atlas
+#     sudo docker build --squash -t gcr.io/mouse-brain-atlas/jonahatlas .
+#     sudo docker push gcr.io/mouse-brain-atlas/jonahatlas

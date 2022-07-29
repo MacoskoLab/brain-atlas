@@ -2,14 +2,11 @@ The goal of this is to use Hail Batch to parallelize diffexp runs.
 
 The main idea is that the only state a run needs is the constant atlas files (see below) + and the 'diffexp triplet' = the result of `get_comps` = `(comp, c_i, c_j)`.
 
-There are main files: 
+There are main files:
 
 - hail_diffexp_runner.py
 
-The actual script run on hail docker instances. This takes as input {the
-constant atlas files, the list of diffexp triplets, and the diffexp triplet
-indices to actuall run} and then runs `find_genes.generic_de` on those
-triplets. It returns a pickle file of the result
+The actual script run on hail docker instances. This takes the constant atlas files, the list of diffexp triplets, and the diffexp triplet indices as input, and then runs `find_genes.generic_de` on those triplets. It returns a pickle file of the result.
 
 - hail_diffexp_coach.py
 
@@ -17,7 +14,7 @@ The script which interfaces with hail batch (the coach manages the runner :-) ).
 
 - Dockerfile
 
-This installes the conda environment as needed for brain-atlas
+This installs the conda environment as needed for brain-atlas
 
 # Getting ready to run
 

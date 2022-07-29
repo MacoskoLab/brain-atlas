@@ -84,7 +84,7 @@ def main(
         j.command(
             "NUMEXPR_NUM_THREADS=10 OMP_NUM_THREADS=10 "
             "OPENBLAS_NUM_THREADS=10 MKL_NUM_THREADS=10 NUMBA_NUM_THREADS=10 "
-            f"hail_de --input-file {main_input} --output-file {j.ofile} "
+            f"hail-de --input-file {main_input} --output-file {j.ofile} "
             f"--start {start} --endexc {end}"
         )
 

@@ -1,6 +1,6 @@
 FROM mambaorg/micromamba:0.24.0
 
-COPY . /brain-atlas
+COPY --chown=$MAMBA_USER:$MAMBA_USER . /brain-atlas
 
 RUN cd /brain-atlas \
        && micromamba install -n base -y -f hail_environment.yml \

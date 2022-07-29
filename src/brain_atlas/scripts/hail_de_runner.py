@@ -52,7 +52,7 @@ import brain_atlas.find_genes as find_genes
     help="Number of dask threads p/ worker to run",
 )
 @click.option("--n-subsample", type=int, default=40000)
-def do_diff_exp(
+def main(
     input_file,
     output_file,
     start,
@@ -175,4 +175,4 @@ def do_diff_exp(
 
 
 if __name__ == "__main__":
-    do_diff_exp()
+    main()

@@ -3,7 +3,7 @@ FROM mambaorg/micromamba:0.24.0
 COPY --chown=$MAMBA_USER:$MAMBA_USER . /brain-atlas
 
 RUN cd /brain-atlas \
-       && micromamba install -n base -y -f hail_environment.yml \
+       && micromamba install -n base -y -f src/brain_atlas/hail/hail_environment.yml \
        && micromamba clean -afy \
        && /opt/conda/bin/pip install . --no-deps
 

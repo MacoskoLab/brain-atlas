@@ -4,21 +4,21 @@ import hailtop.batch as hb
 
 @click.command("hail")
 @click.option("--batch-name", default="atlas-de")
-@click.option("--triplet-file", required=True, help="Name of DE triple pickle on GCS")
+@click.option("--triplet-file", required=True, help="Path to DE triplet pickle on GCS")
+@click.option("--cluster-data", required=True, help="Path to cluster npz on GCS")
 @click.option("--n-jobs", type=int, required=True, help="Number of jobs to run")
 @click.option("--step", type=int, default=1)
 @click.option("--project", default="Mouse-Brain-Atlas")
-@click.option("--gs-data", default="gs://macosko_data/jwebber/hail_input")
 @click.option("--gs-output", default="gs://macosko_data/jwebber/hail_output")
 @click.option("--remote-tmp", default="gs://macosko_data/jwebber/hail_tmp")
-@click.option("--default-image", default="gcr.io/mouse-brain-atlas/jonahatlas:latest")
+@click.option("--default-image", default="gcr.io/mouse-brain-atlas/hail-de:latest")
 def main(
     batch_name: str,
     triplet_file: str,
+    cluster_data: str,
     n_jobs: int,
     step: int,
     project: str,
-    gs_data: str,
     gs_output: str,
     remote_tmp: str,
     default_image: str,
@@ -57,24 +57,10 @@ def main(
         end = start + step
         j = b.new_bash_job(name=f"atlas-de-{start}")
 
-        # Have a set of files need for each job. Let hail take care of downloading
-        # from GCS and depositing into random location (then we move into root)
-        fn_need = [
-            "atlas_500umis_mt-1pct_cells.txt.gz",
-            "gene_list.txt",
-            "clusters.pickle",
-            "cluster_nz_arr.pickle",
-            "cluster_count_arr.pickle",
-            "hail_de_runner.py",
-        ]
-
-        # Get files and put into root. Can also paramaterize runner function based
+        # Get data file and put into root. Can also paramaterize runner function based
         # on the input_file path, but mv doesn't take any time
-        for fn in fn_need:
-            this_input = b.read_input(f"{gs_data}/{fn}")
-            j.command(f"mv {this_input} /{fn}; du -shc /{fn}")
-
-        main_input = b.read_input(f"{gs_data}/{triplet_file}")
+        local_data_path = b.read_input(cluster_data)
+        main_input = b.read_input(triplet_file)
 
         # maybe only necessary because it was using the 'mamba user'?
         j.command("chmod -R 777 /io/batch")
@@ -82,10 +68,26 @@ def main(
         # Messed around with BLAS/NUMBA environment variables profiling. Overloading
         # 10 threads with 2 cores was faster, with slight diminishing returns but 1.5-2x faster
         j.command(
-            "NUMEXPR_NUM_THREADS=10 OMP_NUM_THREADS=10 "
-            "OPENBLAS_NUM_THREADS=10 MKL_NUM_THREADS=10 NUMBA_NUM_THREADS=10 "
-            f"hail-de --input-file {main_input} --output-file {j.ofile} "
-            f"--start {start} --endexc {end}"
+            " ".join(
+                (
+                    "NUMEXPR_NUM_THREADS=10",
+                    "OMP_NUM_THREADS=10",
+                    "OPENBLAS_NUM_THREADS=10",
+                    "MKL_NUM_THREADS=10",
+                    "NUMBA_NUM_THREADS=10",
+                    "hail-de",
+                    "--input-file",
+                    f"{main_input}",
+                    "--output-file",
+                    f"{j.ofile}",
+                    "--cluster-data",
+                    f"{local_data_path}",
+                    "--start",
+                    f"{start}",
+                    "--endexc",
+                    f"{end}",
+                )
+            )
         )
 
         # Let hail go from j.ofile -> the GCS filename. Assumes triplet_FN is

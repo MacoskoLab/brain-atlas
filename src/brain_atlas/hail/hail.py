@@ -72,6 +72,7 @@ def main(
         j.command(
             " ".join(
                 (
+                    "source /usr/local/bin/_activate_current_env.sh;",
                     "NUMEXPR_NUM_THREADS=10",
                     "OMP_NUM_THREADS=10",
                     "OPENBLAS_NUM_THREADS=10",

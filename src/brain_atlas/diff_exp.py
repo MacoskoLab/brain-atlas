@@ -20,7 +20,7 @@ def tiecorrect(rankvals):
 
         size = np.float64(arr.size)
         if size >= 2:
-            tc[j] = 1.0 - (t_k ** 3 - t_k).sum() / (size ** 3 - size)
+            tc[j] = 1.0 - (t_k**3 - t_k).sum() / (size**3 - size)
 
     return tc
 

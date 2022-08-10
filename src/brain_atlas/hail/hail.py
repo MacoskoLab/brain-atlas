@@ -4,7 +4,7 @@ import hailtop.batch as hb
 
 @click.command("hail")
 @click.option("--batch-name", default="atlas-de")
-@click.option("--triplet-file", required=True, help="Path to DE triplet pickle on GCS")
+@click.option("--node-tree", required=True, help="Path to node tree pickle on GCS")
 @click.option("--cluster-data", required=True, help="Path to cluster npz on GCS")
 @click.option("--n-jobs", type=int, required=True, help="Number of jobs to run")
 @click.option("--step", type=int, default=1)
@@ -14,7 +14,7 @@ import hailtop.batch as hb
 @click.option("--default-image", default="gcr.io/mouse-brain-atlas/hail-de:latest")
 def main(
     batch_name: str,
-    triplet_file: str,
+    node_tree: str,
     cluster_data: str,
     n_jobs: int,
     step: int,
@@ -60,7 +60,7 @@ def main(
         # Get data file and put into root. Can also paramaterize runner function based
         # on the input_file path, but mv doesn't take any time
         local_data_path = b.read_input(cluster_data)
-        main_input = b.read_input(triplet_file)
+        main_input = b.read_input(node_tree)
 
         # maybe only necessary because it was using the 'mamba user'?
         j.command("chmod -R 777 /io/batch")

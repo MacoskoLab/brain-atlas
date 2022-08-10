@@ -54,6 +54,8 @@ log = logging.getLogger("hail-de")
     default=2,
     help="Number of dask threads p/ worker to run",
 )
+@click.option("--max-nz-b", type=float, default=0.2)
+@click.option("--delta-nz", type=float, default=0.2)
 @click.option("--n-subsample", type=int, default=40000)
 @click.option("--debug", is_flag=True, help="Turn on debug logging")
 def main(
@@ -66,6 +68,8 @@ def main(
     mem_limit: str = "12GB",
     n_workers: int = 6,
     n_threads: int = 2,
+    max_nz_b: float = 0.2,
+    delta_nz: float = 0.2,
     n_subsample: int = 40000,
     debug: bool = False,
 ):
@@ -83,46 +87,58 @@ def main(
     client = dask.distributed.Client(cluster)
     count_array = da.from_zarr(array_path, "counts")
 
-    # All these files are precalculated and loaded into root by hail, see `coach` file
+    # All these files are precalculated and loaded into root by hail
     with np.load(cluster_data) as d:
         clusters = d["clusters"]
         cluster_nz_arr = d["cluster_nz_arr"]
         cluster_count_arr = d["cluster_count_arr"]
 
-    # Since the comparison triplet-tuple is so small, not worth exporting one
-    # pickle per job. Just export one and then have hail take a range to run (Can
-    # just submit one hail job per run, but since startup takes time (docker image
-    # loading + pickle loading), can be worth it to amortize cost by running a few
-    # diffexp runs per job with nested parallelism)
-    with open(input_file, "rb") as handle:
-        allcompos_out = pickle.load(handle)
+    log.debug(f"Loading node_tree from {input_file}")
+    with open(input_file, "rb") as fh:
+        node_tree = pickle.load(fh)
         log.debug("finished loading")
 
-    this_comps = list(itertools.islice(allcompos_out, start, endexc))
-
-    # Make node_tree just an index
-    def this_comp_function(k, node_tree):
-        return this_comps[k]
-
-    with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-        de_results = dict()
-        find_genes.generic_de(
-            this_comp_function,
-            count_array,
-            clusters,
-            # Fake node_tree, get's the k'th element of the
-            # comparison list from this_comp_function
-            node_tree=range(len(this_comps)),
-            cluster_nz=cluster_nz_arr,
-            cluster_counts=cluster_count_arr,
-            de_results=de_results,
-            subsample=n_subsample,
+    # use islice to grab a small chunk of comparison keys without computing indices
+    comp_list = list(
+        itertools.islice(
+            (
+                (k1, k2)
+                for k1, k2 in itertools.combinations(sorted(node_tree), 2)
+                if k1 != k2[: len(k1)]
+            ),
+            start,
+            endexc,
         )
+    )
+
+    # only compute cluster indices for the small chunk
+    comp_list = [
+        (
+            (k1, k2),
+            np.array(node_tree[k1].pre_order(True, lambda nd: nd.index)),
+            np.array(node_tree[k2].pre_order(True, lambda nd: nd.index)),
+        )
+        for k1, k2 in comp_list
+    ]
+
+    de_results = dict()
+    with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+        # same logic as find_genes.generic_de, somewhat simplified
+        for comp, c_i, c_j in comp_list:
+            log.debug(f"Comparing {c_i} with {c_j}")
+            nz_i, nz_j, nz_filter = find_genes.calc_filter(
+                cluster_count_arr, cluster_nz_arr, c_i, c_j, max_nz_b, delta_nz
+            )
+
+            _, p = find_genes.de(
+                count_array, clusters, c_i, c_j, nz_filter, n_subsample
+            )
+            de_results[comp] = p, nz_i, nz_j, nz_filter
 
     # Write to output path from hail so takes care of exporting to GCS without enlarging docker
     with open(output_file, "wb") as handle:
         pickle.dump(de_results, handle)
-        log.debug("DONE")
+        log.debug("Done!")
 
     # Can be lingering dask threads which were keeping hail running even after
     # returned. But happily sys.exit forces all children to die

@@ -6,16 +6,18 @@ import hailtop.batch as hb
 @click.option("--batch-name", default="atlas-de")
 @click.option("--node-tree", required=True, help="Path to node tree pickle on GCS")
 @click.option("--cluster-data", required=True, help="Path to cluster npz on GCS")
+@click.option("--count-array", required=True, help="Path to count array on GCS")
 @click.option("--n-jobs", type=int, required=True, help="Number of jobs to run")
 @click.option("--step", type=int, default=1)
-@click.option("--project", default="Mouse-Brain-Atlas")
-@click.option("--gs-output", default="gs://macosko_data/jwebber/hail_output")
-@click.option("--remote-tmp", default="gs://macosko_data/jwebber/hail_tmp")
+@click.option("--project", default="mouse-brain-atlas")
+@click.option("--gs-output", default="gs://macosko_data/jwebber/hail/hail_output")
+@click.option("--remote-tmp", default="gs://macosko_data/jwebber/hail/hail_tmp")
 @click.option("--default-image", default="gcr.io/mouse-brain-atlas/hail-de:latest")
 def main(
     batch_name: str,
     node_tree: str,
     cluster_data: str,
+    count_array: str,
     n_jobs: int,
     step: int,
     project: str,
@@ -82,6 +84,8 @@ def main(
                     f"{j.ofile}",
                     "--cluster-data",
                     f"{local_data_path}",
+                    "--array-path",
+                    f"{count_array}",
                     "--start",
                     f"{start}",
                     "--endexc",

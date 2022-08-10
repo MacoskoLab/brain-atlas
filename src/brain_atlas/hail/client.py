@@ -22,7 +22,7 @@ log = logging.getLogger("hail-de")
     "--input-file",
     required=True,
     type=click.Path(exists=True, path_type=Path),
-    help="Path to pickle of DE triplets to compare",
+    help="Path to node tree pickle on GCS",
 )
 @click.option(
     "--output-file",
@@ -87,7 +87,7 @@ def main(
     client = dask.distributed.Client(cluster)
     count_array = da.from_zarr(array_path, "counts")
 
-    # All these files are precalculated and loaded into root by hail
+    # this file is precalculated and loaded into root by hail
     with np.load(cluster_data) as d:
         clusters = d["clusters"]
         cluster_nz_arr = d["cluster_nz_arr"]

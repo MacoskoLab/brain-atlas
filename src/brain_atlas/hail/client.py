@@ -89,7 +89,7 @@ def main(
 
     # this file is precalculated and loaded into root by hail
     with np.load(cluster_data) as d:
-        clusters = d["clusters"]
+        cluster_i = d["clusters"]
         cluster_nz_arr = d["cluster_nz_arr"]
         cluster_count_arr = d["cluster_count_arr"]
 
@@ -111,29 +111,53 @@ def main(
         )
     )
 
-    # only compute cluster indices for the small chunk
-    comp_list = [
-        (
-            (k1, k2),
-            np.array(node_tree[k1].pre_order(True, lambda nd: nd.index)),
-            np.array(node_tree[k2].pre_order(True, lambda nd: nd.index)),
-        )
-        for k1, k2 in comp_list
-    ]
+    # find the set of all keys being compared, size should be
+    # on the order of the number of jobs
+    key_list = sorted({k for kk in comp_list for k in kk})
+    key2i = {k: np.array([i]) for i, k in enumerate(key_list)}
+
+    # for each key, calculate a single subsample, and download it.
+    # then, construct a new cluster_i array to reflect the new ids
+    # this might download some redundant data but it keeps the samples
+    # independent
+    local_nz_arr = []
+    local_count_arr = []
+    local_cluster_i = []
+    local_array = []
+
+    for i, k in enumerate(key_list):
+        k_group = np.array(node_tree[k].pre_order(True, lambda nd: nd.index))
+
+        ix = np.isin(cluster_i, k_group)
+        sub_ix = find_genes.calc_subsample(ix.sum(), n_subsample)
+
+        # nz and count use full data, but get consolidated
+        local_nz_arr.append(cluster_nz_arr[k_group, :].sum(axis=0, keepdims=True))
+        local_count_arr.append(cluster_count_arr[k_group].sum())
+
+        local_cluster_i.extend(i for _ in range(sub_ix.shape[0]))
+        local_array.append(count_array[ix, :][sub_ix, :])
+
+    local_nz_arr = np.vstack(local_nz_arr)
+    local_count_arr = np.array(local_count_arr)
+    local_cluster_i = np.array(local_cluster_i)
+
+    with dask.config.set(**{"array.slicing.split_large_chunks": False}):
+        local_array = da.vstack(local_array).compute()
+
+    # recalculate flattened cluster indices in terms of the local array
+    comp_list = [((k1, k2), key2i[k1], key2i[k2]) for k1, k2 in comp_list]
 
     de_results = dict()
-    with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-        # same logic as find_genes.generic_de, somewhat simplified
-        for comp, c_i, c_j in comp_list:
-            log.debug(f"Comparing {c_i} with {c_j}")
-            nz_i, nz_j, nz_filter = find_genes.calc_filter(
-                cluster_count_arr, cluster_nz_arr, c_i, c_j, max_nz_b, delta_nz
-            )
+    # same logic as find_genes.generic_de, somewhat simplified
+    for comp, c_i, c_j in comp_list:
+        log.debug(f"Comparing {c_i} with {c_j}")
+        nz_i, nz_j, nz_filter = find_genes.calc_filter(
+            local_count_arr, local_nz_arr, c_i, c_j, max_nz_b, delta_nz
+        )
 
-            _, p = find_genes.de(
-                count_array, clusters, c_i, c_j, nz_filter, n_subsample
-            )
-            de_results[comp] = p, nz_i, nz_j, nz_filter
+        _, p = find_genes.de(local_array, local_cluster_i, c_i, c_j, nz_filter)
+        de_results[comp] = p, nz_i, nz_j, nz_filter
 
     # Write to output path from hail so takes care of exporting to GCS without enlarging docker
     with open(output_file, "wb") as handle:

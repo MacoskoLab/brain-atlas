@@ -125,25 +125,25 @@ def main(
     local_cluster_i = []
     local_array = []
 
+    log.debug("downloading data")
     for i, k in enumerate(key_list):
         k_group = np.array(node_tree[k].pre_order(True, lambda nd: nd.index))
-
-        ix = np.isin(cluster_i, k_group)
-        sub_ix = find_genes.calc_subsample(ix.sum(), n_subsample)
+        ix = find_genes.calc_subsample(np.isin(cluster_i, k_group), n_subsample)
 
         # nz and count use full data, but get consolidated
         local_nz_arr.append(cluster_nz_arr[k_group, :].sum(axis=0, keepdims=True))
         local_count_arr.append(cluster_count_arr[k_group].sum())
 
-        local_cluster_i.extend(i for _ in range(sub_ix.shape[0]))
-        local_array.append(count_array[ix, :][sub_ix, :])
+        local_cluster_i.extend(i for _ in range(ix.shape[0]))
+        local_array.append(count_array[ix, :].compute())
 
     local_nz_arr = np.vstack(local_nz_arr)
     local_count_arr = np.array(local_count_arr)
     local_cluster_i = np.array(local_cluster_i)
 
-    with dask.config.set(**{"array.slicing.split_large_chunks": False}):
-        local_array = da.vstack(local_array).compute()
+    local_array = np.vstack(local_array)
+
+    log.debug(f"downloaded count array of size {local_array.shape}")
 
     # recalculate flattened cluster indices in terms of the local array
     comp_list = [((k1, k2), key2i[k1], key2i[k2]) for k1, k2 in comp_list]

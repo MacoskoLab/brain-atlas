@@ -66,11 +66,12 @@ def calc_filter(
     return nz_1, nz_2, nz_filter
 
 
-def calc_subsample(n_samples: int, subsample: int):
-    if n_samples <= subsample:
-        return np.arange(n_samples)
+def calc_subsample(full_index: np.ndarray, subsample: int):
+    nz_index = np.nonzero(full_index)[0]
+    if nz_index.shape[0] <= subsample:
+        return nz_index
     else:
-        return np.sort(np.random.choice(n_samples, size=subsample, replace=False))
+        return np.sort(np.random.choice(nz_index, size=subsample, replace=False))
 
 
 def cluster_reduce(
@@ -143,11 +144,11 @@ def de(
     full_p = np.zeros(data.shape[1])  # logp, no result = 0
 
     if np.any(gene_filter):
+        if subsample is not None:
+            c_a = calc_subsample(c_a, subsample)
+            c_b = calc_subsample(c_b, subsample)
         ds_a = data[c_a, :][:, gene_filter]
         ds_b = data[c_b, :][:, gene_filter]
-        if subsample is not None:
-            ds_a = ds_a[calc_subsample(ds_a.shape[0], subsample), :]
-            ds_b = ds_b[calc_subsample(ds_b.shape[0], subsample), :]
 
         if isinstance(data, da.Array):
             ds_a, ds_b = da.compute(ds_a, ds_b)

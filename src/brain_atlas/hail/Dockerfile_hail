@@ -11,10 +11,12 @@ RUN rm -rf /opt/conda/conda-meta && \
   rm -rf /opt/conda/include && \
   rm /opt/conda/lib/libpython3.7m.so.1.0 && \
   find /opt/conda -name '__pycache__' -type d -exec rm -rf '{}' '+' && \
-  rm -rf /opt/conda/lib/python3.7/site-packages/pip /opt/conda/lib/python3.7/idlelib /opt/conda/lib/python3.7/ensurepip \
+  rm -rf /opt/conda/lib/python3.7/site-packages/pip \
+    /opt/conda/lib/python3.7/idlelib \
+    /opt/conda/lib/python3.7/ensurepip \
     /opt/conda/bin/sqlite3 \
     /opt/conda/bin/openssl && \
-  find /opt/conda -name 'tests' -type d -print0 | xargs -0 rm -r && \
+  find /opt/conda -name 'tests' -type d -exec rm -rf '{}' '+' && \
   find /opt/conda -name '*.a' -type f -delete
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1

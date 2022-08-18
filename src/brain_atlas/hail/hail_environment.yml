@@ -1,12 +1,12 @@
 name: atlas
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - python=3.7
   - pip
   - click
-  - dask
+  - dask-core
+  - distributed
   - gcsfs
   - numba
   - numpy

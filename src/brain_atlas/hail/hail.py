@@ -7,22 +7,20 @@ import hailtop.batch as hb
 @click.option("--node-tree", required=True, help="Path to node tree pickle on GCS")
 @click.option("--cluster-data", required=True, help="Path to cluster npz on GCS")
 @click.option("--count-array", required=True, help="Path to count array on GCS")
+@click.option("--gs-output", required=True, help="Path for output on GCS")
 @click.option("--n-jobs", type=int, required=True, help="Number of jobs to run")
 @click.option("--step", type=int, default=1)
 @click.option("--project", default="mouse-brain-atlas")
-@click.option("--gs-output", default="gs://macosko_data/jwebber/hail/hail_output")
-@click.option("--remote-tmp", default="gs://macosko_data/jwebber/hail/hail_tmp")
 @click.option("--default-image", default="gcr.io/mouse-brain-atlas/hail-de:latest")
 def main(
     batch_name: str,
     node_tree: str,
     cluster_data: str,
     count_array: str,
+    gs_output: str,
     n_jobs: int,
     step: int,
     project: str,
-    gs_output: str,
-    remote_tmp: str,
     default_image: str,
 ):
     backend = hb.ServiceBackend(
@@ -30,7 +28,7 @@ def main(
         # Not used much but hail can deposit things here.
         # Should clear out periodically or set up with
         # a lifecycle where just deletes after 20 days
-        remote_tmpdir=remote_tmp,
+        remote_tmpdir=f"{gs_output}/tmp",
     )
 
     b = hb.Batch(

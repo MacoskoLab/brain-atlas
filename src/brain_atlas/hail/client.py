@@ -19,7 +19,8 @@ log = logging.getLogger("hail-de")
 
 @click.command()
 @click.option(
-    "--input-file",
+    "--node-tree",
+    "node_tree_file",
     required=True,
     type=click.Path(exists=True, path_type=Path),
     help="Path to node tree pickle on GCS",
@@ -59,7 +60,7 @@ log = logging.getLogger("hail-de")
 @click.option("--n-subsample", type=int, default=40000)
 @click.option("--debug", is_flag=True, help="Turn on debug logging")
 def main(
-    input_file: Path,
+    node_tree_file: Path,
     output_file: Path,
     cluster_data: Path,
     array_path: str,
@@ -75,7 +76,7 @@ def main(
 ):
     create_logger(debug)
     log.debug(f"Number of numba threads: {nb.get_num_threads()}")
-    log.info(input_file)
+    log.info(node_tree_file)
     log.info(output_file)
 
     cluster = dask.distributed.LocalCluster(
@@ -93,8 +94,8 @@ def main(
         cluster_nz_arr = d["cluster_nz_arr"]
         cluster_count_arr = d["cluster_count_arr"]
 
-    log.debug(f"Loading node_tree from {input_file}")
-    with open(input_file, "rb") as fh:
+    log.debug(f"Loading node_tree from {node_tree_file}")
+    with open(node_tree_file, "rb") as fh:
         node_tree = pickle.load(fh)
         log.debug("finished loading")
 

@@ -20,7 +20,7 @@ def tiecorrect(rankvals):
 
         size = np.float64(arr.size)
         if size >= 2:
-            tc[j] = 1.0 - (t_k ** 3 - t_k).sum() / (size ** 3 - size)
+            tc[j] = 1.0 - (t_k**3 - t_k).sum() / (size**3 - size)
 
     return tc
 
@@ -50,8 +50,33 @@ def rankdata(data):
     return ranked
 
 
+def spearmanr(x: np.ndarray):
+    """
+    Version of Spearman correlation that runs in parallel on a 2d array.
+
+    This computes all-by-all correlation and returns the arrays of r values
+    and log p-values, using a two-sided test.
+    """
+    n_obs, n_vars = x.shape
+    a_ranked = rankdata(x)
+
+    r = np.corrcoef(a_ranked, rowvar=False)
+    dof = n_obs - 2  # degrees of freedom
+
+    # r can have elements equal to 1, so avoid zero division warnings
+    with np.errstate(divide="ignore"):
+        # clip the small negative values possibly caused by rounding
+        # errors before taking the square root
+        t = r * np.sqrt((dof / ((r + 1.0) * (1.0 - r))).clip(0))
+
+    logp = np.minimum(scipy.stats.t.logcdf(-np.abs(t), dof) + np.log(2), 0)
+
+    return r, logp
+
+
 def mannwhitneyu(x, y, use_continuity=True):
-    """Version of Mann-Whitney U-test that runs in parallel on 2d arrays
+    """
+    Version of Mann-Whitney U-test that runs in parallel on 2d arrays
 
     This is the two-sided test, asymptotic algo only. Returns log p-values
     """

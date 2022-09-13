@@ -39,6 +39,7 @@ def leiden_sweep(
         if res in cached_arrays:
             membership = cached_arrays[res]
         else:
+            # initializing the partition with the previous membership, if available
             partition = la.CPMVertexPartition(
                 graph,
                 initial_membership=membership,

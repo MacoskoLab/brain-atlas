@@ -1,7 +1,6 @@
 import dask
 import h5py
 import numpy as np
-import scipy.sparse
 import sparse
 from gcsfs import GCSFileSystem
 
@@ -19,7 +18,7 @@ def read_10x_h5(path: str):
         indices = np.asarray(fh["matrix"]["indices"])
         indptr = np.asarray(fh["matrix"]["indptr"])
 
-    matrix = scipy.sparse.csr_matrix((data, indices, indptr), shape=(N, M))
+    matrix = sparse.GCXS((data, indices, indptr), shape=(N, M), compressed_axes=(0,))
 
     return matrix, barcodes, genes
 

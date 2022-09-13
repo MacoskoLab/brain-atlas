@@ -47,7 +47,12 @@ log = logging.getLogger(__name__)
     default=None,
 )
 @click.option("--min-res", type=int, default=-9, help="Minimum resolution 10^MIN_RES")
-@click.option("--max-res", type=int, default=-1, help="Maximum resolution 5x10^MAX_RES")
+@click.option(
+    "--max-res",
+    type=int,
+    default=-1,
+    help="Maximum resolution 5x10^MAX_RES (9 if high-res)",
+)
 @click.option(
     "--min-gene-diff",
     type=float,
@@ -301,12 +306,14 @@ def main(
     log.info(f"Building graph with {edges.shape[0]} edges")
     graph = ig.Graph(n=n_cells, edges=edges, edge_attrs={"weight": weights})
 
+    # clustering over a range of resolutions on a log scale
     if high_res:
-        bs = range(1, 10)
+        bs = range(1, 10)  # 0.01, 0.02, ... 0.09, 0.1, 0.2, ... 0.9
     else:
-        bs = (1, 2, 5)
+        bs = (1, 2, 5)  # 0.01, 0.02, 0.05, 0.1, 0.2, 0.5
 
     if valid_cache and tree.clustering.exists():
+        # load any existings results to save some time
         with np.load(tree.clustering) as data:
             cached_arrays = {float(k): d[d > -1] for k, d in data.items()}
 
@@ -316,18 +323,31 @@ def main(
     else:
         cached_arrays = None
 
-    # leiden on igraph on range of resolution values
-    # find lowest non-trivial resolution (count0 / count1 < some_max_value)
-    res_list = [float(f"{b}e{p}") for p in range(min_res, max_res + 1) for b in bs]
-    res_arrays, _ = leiden_sweep(graph, res_list, cutoff, cached_arrays=cached_arrays)
-
-    clusterings = {}
-    for res in sorted(res_arrays):
-        # set all cells in other clusters to -1
+    if len(graph.components()) > 1:
+        # if the graph is not a single connected component, there is likely too little signal to
+        # meaningfully subcluster it into different pieces. We should consider this to be a leaf
+        log.warning(
+            f"The graph has {len(graph.components())} components, skipping Leiden"
+        )
+        # Just make one big clustering and save that
         all_cells = -1 * np.ones_like(clusters)
-        # add cluster assignments for this resolution
-        all_cells[ci] = res_arrays[res]
-        clusterings[f"{res}"] = all_cells
+        all_cells[ci] = 0
+        clusterings = {f"1e{min_res}": all_cells}
+    else:
+        # leiden on igraph on range of resolution values
+        # find lowest non-trivial resolution (count0 / count1 < some_max_value)
+        res_list = [float(f"{b}e{p}") for p in range(min_res, max_res + 1) for b in bs]
+        res_arrays, _ = leiden_sweep(
+            graph, res_list, cutoff, cached_arrays=cached_arrays
+        )
+
+        clusterings = {}
+        for res in sorted(res_arrays):
+            # set all cells in other clusters to -1
+            all_cells = -1 * np.ones_like(clusters)
+            # add cluster assignments for this resolution
+            all_cells[ci] = res_arrays[res]
+            clusterings[f"{res}"] = all_cells
 
     log.debug(f"Saving clustering output to {tree.clustering}")
     np.savez_compressed(tree.clustering, **clusterings)

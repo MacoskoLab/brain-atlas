@@ -1,4 +1,6 @@
+import csv
 import logging
+from pathlib import Path
 
 import click
 import dask
@@ -25,11 +27,33 @@ log = logging.getLogger(__name__)
     "--output-zarr",
     required=True,
     type=click.Path(dir_okay=True, file_okay=False, exists=False),
+    help="Output path for zarr array",
 )
-@click.option("--output-cells", required=True, type=click.Path(dir_okay=False))
-@click.option("--output-genes", required=True, type=click.Path(dir_okay=False))
-@click.option("--min-umis", type=int, default=500)
-@click.option("-p", "--max-pct", type=float, default=0.01)
+@click.option(
+    "--output-cells",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Output path for cell list",
+)
+@click.option(
+    "--output-genes",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Output path for gene list",
+)
+@click.option("--min-umis", type=int, default=500, help="Minimum UMIs per cell")
+@click.option(
+    "-p",
+    "--max-pct",
+    type=float,
+    default=0.01,
+    help="Max percent for mitochondrial UMIs",
+)
+@click.option(
+    "--gene-file",
+    type=click.Path(exists=True, path_type=Path),
+    help="Optional file to map gene ids to names",
+)
 @click.option("--google-project", help="GCP Project ID to use")
 def main(
     h5_files: str,
@@ -38,6 +62,7 @@ def main(
     output_genes: str = None,
     min_umis: int = 500,
     max_pct: float = 0.01,
+    gene_file: Path = None,
     google_project: str = None,
 ):
     """Downloads a list of H5_FILE from Google Cloud Storage and writes them to Zarr.
@@ -50,7 +75,6 @@ def main(
     fs = gcsfs.GCSFileSystem(project=google_project)
 
     log.info(f"reading metadata for {len(h5_files)} h5 files")
-
     sgb = [read_10x_h5_meta_from_gcs(path, fs) for path in h5_files]
     sizes, barcodes, genes = zip(*dask.compute(sgb)[0])
     genes = set(genes)
@@ -61,6 +85,18 @@ def main(
     mito_idx = np.array(
         [i for i, (gene_name, _) in enumerate(genes) if gene_name.startswith("mt")]
     )
+
+    # this code is needed for the output of the Optimus + CellBender pipeline, because
+    # the resulting h5 file contains only gene ids. So we input a separate file with gene
+    # names and verify that it matches up
+    if gene_file is not None:
+        with open(gene_file) as fh:
+            gene_t = [tuple(r[:2]) for r in csv.reader(fh, delimiter="\t")]
+
+        assert [g[0] for g in gene_t] == [
+            g[0] for g in genes
+        ], "gene file did not match"
+        genes = tuple((g[1], g[0]) for g in gene_t)
 
     log.info("Calculating nUMIs and mito pct")
     numis = [read_10x_numis_from_gcs(path, fs) for path in h5_files]

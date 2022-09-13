@@ -52,13 +52,14 @@ def rankdata(data):
 
 def spearmanr(x: np.ndarray):
     """
-    Version of Spearman correlation that runs in parallel on a 2d array.
+    Version of Spearman correlation that runs in parallel on a 2d array. Based
+    on scipy.stats.spearmanr, with some simplifications
 
     This computes all-by-all correlation and returns the arrays of r values
     and log p-values, using a two-sided test.
     """
     n_obs, n_vars = x.shape
-    a_ranked = rankdata(x)
+    a_ranked = rankdata(x)  # this is parallelized
 
     r = np.corrcoef(a_ranked, rowvar=False)
     dof = n_obs - 2  # degrees of freedom

@@ -2,6 +2,12 @@
 
 This repository contains a scripts and tools for clustering sc/snRNAseq data. Specifically, it has been used to cluster roughly 6M single-nuclei profiles generated in the Macosko lab.
 
+The analysis makes heavy use of
+
+1. Our clustering single-nuclei python method, scalable to millions of cells ([in this repository](https://github.com/MacoskoLab/brain-atlas/tree/main/clustering))
+2. [SpaceXR](https://github.com/dmcable/spacexr), a method to map clustered cells onto Slide-seq pucks
+3. [scOnline](https://app.terra.bio/#workspaces/fbrihuman/sconline_integrative_analysis), an analytical framework for analysing millions of transcriptomic profiles
+
 The sequenced libraries were aligned with [cellranger count](https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/using/count) and then processed with [CellBender remove-background](https://cellbender.readthedocs.io/en/latest/usage/index.html).
 
 ### Outline

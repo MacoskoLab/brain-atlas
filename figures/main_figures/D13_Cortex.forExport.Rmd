@@ -1,0 +1,925 @@
+---
+title: "R Notebook"
+editor_options: 
+  chunk_output_type: console
+---
+
+# This code generates Figure 1a + 5c of the Cytoarchitecture Macosko paper
+
+Starting from raw data we want to assign each isocortical slide-seq bead a
+continuous layer distance going from L2 -> L6(b).
+To do so we define the L2 and L6b splines [1] then, for each (internal) isocortical
+point, find the normalized distance ratio between those two splines.
+Up to "REMNANT:05LEr3ni5c" (search below) we are creating that continuous
+value. After that we create the final plot
+
+[1]: As detailed below, we largely determine this spline by using alpha convex
+hull of CCF integration. But for utmost accuracy in corners and for
+anterior/posterior slices, we manually added in spline control points, in
+consultation with other lab members
+
+```{r setup}
+# need SF, unlike normal R environment
+# See 00_Notes_For_Install:
+# Macosko_Rsf mamba package
+
+# Needed for polygon inclusion, every other way keeps failing. But sf is a heavy
+# package
+library(sf)
+# Don't want spherical coords (default) b/c using on flat puck coords
+sf_use_s2(FALSE)
+
+# Used later for final figure colors. Can comment out and remove below
+library(shades);  library(khroma)
+
+source("01_Prelude.R")
+```
+
+Bead_Metadata.qs, Bead_Mapping_Matrix.qs
+    https://drive.google.com/drive/u/1/folders/1D-_3SQJ_oD_xzdq2fwuWn6XaZ7wd-yT1
+
+IsoCortex_AhullOut.qs, 23_Cortex_L1L6pct.qs, Ex_plot_data.qs
+    https://drive.google.com/drive/u/1/folders/1D8IoJhwyCop0EdLnTYNqkpH36nlUETcb
+
+
+```{r}
+# Main dataframe with all the beads' metadata
+MegaMeta = fqread("~/03_RCTD_Subtypes/98_MouseAtlas_Submission/Bead_Metadata.qs")
+
+# Remove beads outside CCF boundaries
+MegaMeta %<>% filter(!is.na(CSHL_acronym) & !originalIsOutsideCCF)
+
+# Main dataframe with all the beads' mapping
+MegaMapping = fqread(glue("~/03_RCTD_Subtypes/98_MouseAtlas_Submission/Bead_Mapping_Matrix.qs"))
+rownames(MegaMapping) %<>% {paste0("MBASS", .)}
+
+
+# Simple reflection to go from CCF XYZ space into sliced XY space
+# (Other parts of the code depend on the axes being x,y)
+doCoordTrans <- function(thisPMeta){
+  thisPMeta[, c("z", "y")] %>%
+    set_colnames(c("x", "y")) %>%
+    {.$y = -1*.$y; .$x = -1*.$x; .}
+}
+
+getJustLayerNM = . %>%
+  str_extract(regex("layer [0-9/abc]+", ignore_case = T)) %>%
+  str_remove(regex("layer ", ignore_case = T)) 
+```
+
+```{r}
+isocortex_depths = MegaMeta %>%
+  {MegaMeta$.id[.$TopStruct == "Isocortex"]} %>%
+  unique
+```
+
+```{r}
+# Get midline x coordinate per puck for later
+pickIMidline = isocortex_depths %>%
+  rlang::set_names() %>%
+  map_dbl(function(thisPuckNm){
+    
+    thisPuckMeta = MegaMeta %>% filter(.id == thisPuckNm & CSHL_LeftRight == "L")
+    
+    thisCoordTrans = doCoordTrans(thisPuckMeta)
+    
+    thisCoordTrans$x %>% quantile(0.999)
+  })
+```
+
+```{r}
+# Very consistently midline is basically -228 so nail on that
+pickIMidline %>% mean
+midlineX = -228
+
+
+
+# Get layer names to double check
+MegaMeta %>%
+  filter(.id %in% isocortex_depths & TopStruct == "Isocortex") %>%
+  {.$CSHL_CCFname} %>%
+  unique %>%
+  map(getJustLayerNM)
+
+# The Isocortical pucks with enough layers to be useful
+chosenPucksI = seq(19, 35)
+
+# Optional, see 00_notes for installation
+# Speeds up calculation but can use a non Rcpp one
+library(RcppAlphahull)
+
+chosenPucks = isocortex_depths
+isocortex_depths_want = isocortex_depths[(19):66]
+
+
+# GOAL: The goal here is to get the hull of layer 2 to layer 6(b). Later we will
+# use these two outer splines to derive a continuous layer value.
+# This uses the CCF boundary to define this spline but at the corners/edges of
+# the curve (especially at the extreme anterior/posterior), many heuristics
+# failed to be perfect (by eye and in consultation with the lab's pathologist).
+# So pass to the `anno.spline` function which uses RShiny to allow the spline
+# control points to be interactively chosen (and for the spline curviness
+# paramater to be tweaked as needed).
+# These points are saved in points_chosen.
+
+thisPuckNm = "MBASS_dd111"
+allPuckOutFN = map(
+  rlang::set_names(isocortex_depths_want),
+  .f=function(thisPuckNm){
+    # b()
+    print(thisPuckNm)
+    thisPuckMeta = MegaMeta %>%
+      filter(.id == thisPuckNm & CSHL_LeftRight == "L")
+    
+    thisCoords = doCoordTrans(thisPuckMeta)
+    
+    # # Debugging plot, need to load 92_plot_puck.R first
+    # layerP = plot_puck(thisPuckMeta$CSHL_CCFname %>%
+    #                      getJustLayerNM() %>% factor,
+    #                    coords = thisCoords,
+    #                    raster = T, raster.dpi=80,
+    #                    cellPropLegend = 0,
+    #                    infini.color = "#deeeff")
+    layerP = NULL
+    
+    
+    justLayer6s = thisPuckMeta$CSHL_CCFname %>%
+      getJustLayerNM() %>%
+      {.[. == "3"]=NA;.} %>%
+      {!is.na(.)}
+    
+    set.seed(2)
+    ahullLayers = thisCoords[justLayer6s,] %>%
+      # Crashes when exactly equal, jitter slightly
+      papply(2, ~{.+runif(length(.), -3e-1, 3e-1)}) %>%
+      as.data.frame %>% distinct() %>%
+      
+      # alphahull::ahull(alpha=15)
+      # RcppAlphahull for speed
+      RcppAlphahull::ahull(alpha=15)
+    
+    if(!ahullLayers$ashape.obj$edges[,c(1,2)] %>%
+                as.numeric %>%
+                stable %>%
+       {all(.==2)}){
+      browser()
+    }
+    
+    # All start and end indices should occur twice, make a linked list circle
+    stopifnot(ahullLayers$ashape.obj$edges[,c(1,2)] %>%
+                as.numeric %>%
+                stable %>%
+                {all(.==2)})
+    
+    ahullLayers$ashape.obj$edges %<>% cbind(II=1:nrow(ahullLayers$ashape.obj$edges))
+    
+    currentI = ahullLayers$ashape.obj$edges[[1, "ind2"]]
+    finalOrder = c(1)
+    for(iterate in 1:(nrow(ahullLayers$ashape.obj$edges)-1)){
+      
+      nextRowInd1 = which(ahullLayers$ashape.obj$edges[, "ind1"] == currentI) %>%
+        setdiff(finalOrder)
+      
+      if(length(nextRowInd1)!= 0){
+        currentI = ahullLayers$ashape.obj$edges[[ nextRowInd1, "ind2" ]]
+        
+        oldtmp = ahullLayers$ashape.obj$edges[nextRowInd1, c("x1", "y1", "x2", "y2")]
+        ahullLayers$ashape.obj$edges[nextRowInd1, c("x1", "y1", "x2", "y2")] = oldtmp[c(3,4,1,2)]
+        
+        finalOrder %<>% c(nextRowInd1)
+      }else{
+        nextRowInd2 = which(ahullLayers$ashape.obj$edges[, "ind2"] == currentI) %>%
+          setdiff(finalOrder)
+        
+        currentI = ahullLayers$ashape.obj$edges[[ nextRowInd2, "ind1" ]]
+        finalOrder %<>% c(nextRowInd2)
+      }
+    }
+    
+    ahullLayers$ashape.obj$edges %<>%  {.[finalOrder, ]}
+    
+    # For plotting debugging
+    # ahullLayers$ashape.obj$edges %>%
+    #   data.frame %>%
+    #   {.$II = 1:nrow(.);.} %>%
+    #   ggplot(aes(x=x1, y=y1,
+    #              color=II))+
+    #   geom_point()
+    
+    thisPickLayers = thisPuckMeta$CSHL_CCFname[justLayer6s]
+    xArcLayers = ahullLayers$ashape.obj$edges[, c("ind1", "ind2")] %>%
+      papply(1, ~thisPickLayers[.]) %>% t %>%
+      papply(1, ~paste0(., collapse="|"))
+    
+    ahullLayers$ashape.obj$edges %<>% {cbind(., arcI=seq(nrow(.)))}
+    
+    # Reverse engineered with alphahull::arc, gets interpolated points from
+    # alphahull's output
+    arcPoints =  function (arcRow)  {
+      
+      # How much to interpolate
+      N=10
+      x_values <- seq(from = arcRow[["x1"]],
+                      to = arcRow[["x2"]],
+                      length.out = N)
+      y_values <- arcRow[["y1"]] +
+        (arcRow[["y2"]] - arcRow[["y1"]]) *
+        (x_values - arcRow[["x1"]]) /
+        (arcRow[["x2"]] - arcRow[["x1"]])
+      
+      data.frame(x=x_values, y=y_values, arcI=arcRow[["arcI"]])
+    }
+    
+    layerName2Points = function(layerName){
+      # Set seed for reproductibility
+      set.seed(digest::digest2int(layerName))
+      thisSetPoints = ahullLayers$ashape.obj$edges[str_detect(xArcLayers, layerName), ] %>%
+        papply(1, arcPoints) %>%
+        # For debugging, assign each arc a UUID for later reference/debugging
+        imap(~{.$arcUUID=stringi::stri_rand_strings(nrow(.), 4, pattern="[a-z02-9]");.}) %>%
+        data.table::rbindlist()
+      thisSetPoints
+    }
+    
+    layerPoints = list(
+      "1"=layerName2Points(("1|(2/3)|2")),
+      "6b"=layerName2Points(("(6b)|(6a)|(6)"))
+    )
+    
+    # Debugging plot
+    # p = layerPoints %>%
+    #   imap(~cbind(., "nm"=.y)) %>%
+    #   data.table::rbindlist() %>% data.frame() %>%
+    #   {.[sample(seq(nrow(.))), ]} %>%
+    #   # {.$rowI = seq(nrow(.));.} %>%
+    #   ggplot(aes(x=x, y=y,
+    #              # color=factor(nm),
+    #              color=(arcI),
+    #              # text=arcUUID
+    #              text=arcI
+    #   ))+
+    #   ggrastr::geom_point_rast(raster.dpi = 80
+    #                            # position=position_jitter(width = 0.0, height = 40.5)
+    #   )+
+    #   scale_color_viridis_c()+
+    #   facet_grid(~nm, margins=T)+
+    #   theme(legend.position = "none")
+    p=NULL
+    
+    anno.spline <- function(obj,col){
+      library(shiny)
+      df <- data.frame(matrix(ncol = 2, nrow = 0)) ; names(df) = c("x","y")
+      spl <- data.frame(matrix(ncol = 2, nrow = 0)) ; names(spl) = c("x","y")
+      
+      xsplineTune <- NA
+      
+      ui <- basicPage(
+        plotOutput("plot1", click = "plot_click", height = "800px"),
+        sliderInput("xsplineTune", "Xspline tune",
+                    min = -2, max = 2, value = -0.75, step = 0.1
+        ),
+        actionButton("again", "Try again"),
+        actionButton("undo", "Undo"),
+        actionButton("done", "Done")
+      )
+      server <- function(input, output) {
+        output$plot1 <- renderPlot({
+          df <<- rbind(df,c(input$plot_click$x,input$plot_click$y))
+          if(nrow(df)>=2){
+            spl <<- xspline(df[,1], df[,2],
+                            shape=c(0,rep(input$xsplineTune, nrow(df)-2),0),draw=F)
+          }else{
+            spl <<- df
+          } # Make the spline
+          par(mar = rep(0, 4))
+          add =0.1
+          minDists = (col == "1" | col == "2" | col == "6a" | col=="6b") %>%
+            {(.+add)/(1+add)}
+          randSel = 1:nrow(obj)
+          
+          plot(obj[randSel,1], obj[randSel,2], col=col[randSel],pch=16, asp=1)
+          if(nrow(df) >=1){
+            points(df[, 1], df[,2], pch=16, asp=1, col="red", cex=2)
+          }
+          lines(spl[[1]],spl[[2]], col="black", lwd=3)
+          
+          xsplineTune <<- input$xsplineTune
+        })
+        observeEvent(input$again, {
+          df <<- data.frame(matrix(ncol = 2, nrow = 0))
+        })
+        observeEvent(input$done, {
+          print(df)
+          stopApp(0)
+        })
+        observeEvent(input$undo, {
+          df <<- df[1:(nrow(df)-1), ]
+        })
+      }
+      options(shiny.host = '0.0.0.0')
+      options(shiny.port = 9999)
+      print(shinyApp(ui, server, option=list(launch.browser=F)))
+      
+      spl = data.frame(spl) ; names(spl) = c("x","y")
+      return(list(spl=spl,
+                  points_chosen=df,
+                  xsplineTune = xsplineTune))
+    }
+    
+    thisLP = layerPoints %>%
+      imap(~cbind(., "nm"=.y)) %>%
+      data.table::rbindlist() %>%
+      data.frame() %>%
+      {.[c("x", "y", "nm")]}
+    
+    tmp = thisPuckMeta$CSHL_CCFname %>% getJustLayerNM()
+    allLayersI = sample(which(!is.na(tmp)), 5000)
+    allLayersDF = cbind(thisCoords[allLayersI, ],
+                        nm=tmp[allLayersI] %>% factor %>% as.numeric %>% {.+2})
+    thisLP = rbind(allLayersDF, thisLP)
+    
+    # For rerunning the manual point chosen:
+    # For exactly identical results, keep commented out and use saved file below
+    # If want to rerun, uncomment below
+    # chosen_pts_L1_L6 = anno.spline(
+    #   as.matrix(thisLP[,c(1,2)]),
+    #   col=thisLP$nm %>% factor)
+    chosen_pts_L1_L6 = NULL
+    
+    
+    ret = list(
+      layerPoints=layerPoints,
+      layerP = layerP,
+      p = p,
+      
+      # If just want to run without interactivity
+      # chosen_pts_L1_L6=NULL
+      # If being used after interactive point checker
+      chosen_pts_L1_L6=chosen_pts_L1_L6
+    )
+    ret
+  })
+l(allPuckOutFN)
+
+pdf("~/03_RCTD_Subtypes/011_PDFs/allCtxHull2.pdf")
+nada = allPuckOutFN %>% map(~.$p) %>% map(print)
+dev.off()
+
+# To save anew, but can also pull down from previous runs, with manually chosen points
+# fqsave(allPuckOutFN, "~/03_RCTD_Subtypes/05 RCTD_Outputs/IsoCortex_AhullOut.qs")
+
+allPuckOutFN = fqread("./05 RCTD_Outputs/IsoCortex_AhullOut.qs")
+
+```
+
+```{r}
+stopifnot(setequal(8,
+                   map_dbl(allPuckOutFN,
+                           ~nrow(.$chosen_pts_L1_L6$points_chosen))))
+
+
+thisP = allPuckOutFN[[16]]
+allPs_withCutoffs = imap(allPuckOutFN, function(thisP, nm){
+  print(nm)
+  
+  for(thisLP_nm in names(thisP$layerPoints)){
+    print(thisLP_nm)
+    thisLP_diff = thisP$layerPoints[[thisLP_nm]][, c("x", "y")] %>%
+      papply(2, ~c(0, diff(.))) %>% abs %>% rowSums
+    # b()
+    # AFTERPUBLISH - WHY, not always true
+    stopifnot(sum(thisLP_diff > 80)<=1)
+    actualEnd = which(thisLP_diff > 80)
+    if(length(actualEnd) > 0){
+      print("reorder")
+      # b()
+      thisP$layerPoints[[thisLP_nm]] %<>% {.[c(actualEnd:nrow(.), (1:(actualEnd-1))), ]}
+    }
+    if((thisP$layerPoints[[thisLP_nm]]$y %>% {.[1] > .[length(.)]})){
+      print("rev")
+      thisP$layerPoints[[thisLP_nm]] %<>% {.[rev(1:nrow(.)), ]}
+    }
+  }
+  
+  
+  
+  
+  nm = "1"
+  nm = "6b"
+  for(nm in names(thisP$layerPoints)){
+    
+    if(nm == "6b"){
+      startAtIndx = 0
+    }else if(nm == "1"){
+      startAtIndx = 4
+    }else{
+      stopifnot(F)
+    }
+    
+    thisLayerPts = thisP$layerPoints[[nm]][, c("x", "y")]
+
+    cutoff_start = thisP$chosen_pts_L1_L6$points_chosen[startAtIndx+1,]
+    new_start    = thisP$chosen_pts_L1_L6$points_chosen[startAtIndx+2,]
+    cutoff_end   = thisP$chosen_pts_L1_L6$points_chosen[startAtIndx+3,]
+    new_end      = thisP$chosen_pts_L1_L6$points_chosen[startAtIndx+4,]
+
+    cutoff_closestI = Rfast::dista(thisP$chosen_pts_L1_L6$points_chosen[startAtIndx+c(1,3), ],
+                                   thisLayerPts) %>%
+                            Rfast::rowMins(value=F)
+    thisLayerPts$isCutoff = 0
+    thisLayerPts[cutoff_closestI, "isCutoff"] = 1
+
+
+   thisLayerPts %<>% {.[cutoff_closestI[[1]]:(cutoff_closestI[[2]]),]}
+
+   thisP$layerPoints[[nm]] %<>% {.[cutoff_closestI[[1]]:(1+cutoff_closestI[[2]]),]}
+    
+   thisP$layerPoints[[nm]] %<>% {.[, c("x", "y")]}
+
+    ggplot()+
+      geom_point(aes(x=x, y=y,
+                     col=isCutoff),
+                     # col=i),
+                        data=thisLayerPts)+
+      geom_point(aes(x=x, y=y), color="red",
+                        data=thisP$chosen_pts_L1_L6$points_chosen[startAtIndx+c(1,3),] %>%
+                   set_colnames(c("x", 'y')))
+
+  }
+  
+  
+  thisP$enclosing_poly = rbind(thisP$layerPoints$`1`,
+                               thisP$layerPoints$`6b` %>% {.[rev(1:nrow(.))]}
+                               ) %>%
+    st_as_sf(coords=c("x", "y")) %>%
+    st_combine %>%
+    st_cast("POLYGON")
+  
+  thisP
+})
+
+# Two diagnosis plots
+# pdf("./011_PDFs/allpoly2.pdf")
+# nada = allPs_withCutoffs %>%
+#   # head(3) %>%
+#   map(~{ggplot()+geom_sf(data = .$enclosing_poly,
+#                          fill = "#0000FF90")}) %>%
+#   map(print)
+# dev.off()
+# # Examine one puck closer
+# do.call(rbind, allPs_withCutoffs[[5]]$layerPoints) %>% plot
+
+fqsave(allPs_withCutoffs, "~/03_RCTD_Subtypes/05 RCTD_Outputs/allPs_withCutoffs.qs")
+allPs_withCutoffs = fqread("~/03_RCTD_Subtypes/05 RCTD_Outputs/allPs_withCutoffs.qs")
+
+# Important, now trust the modifications with these plots, add to main puckIHull
+puckIHull = allPs_withCutoffs
+```
+# Testing continuosu distance
+```{r}
+allPuck_points_L1L6_pct = map(
+  names(puckIHull),
+  function(puckIHull_nm){
+    XYLims = puckIHull[[puckIHull_nm]]$layerPoints %>%
+      data.table::rbindlist() %>%
+      {.[, c("x", "y")]} %>%
+      papply(2, ~c(min(.), max(.)))
+    
+      thisPuckId = puckIHull_nm %>% str_remove(".qs")
+      randomXY = MegaMeta[MegaMeta$.id == thisPuckId, ] %>% doCoordTrans()
+      
+      enclosing_sp_shape = puckIHull[[puckIHull_nm]]$enclosing_poly
+      
+      randomXY_inside_enclosing= randomXY %>% 
+        st_as_sf(coords=c("x", "y")) %>%
+        
+        # Tested and intersects gives same answer and is way faster than _within
+        # st_within(enclosing_sp_shape)
+        st_intersects(enclosing_sp_shape)
+      
+      randomXY$isInside = !is.na(as.numeric(randomXY_inside_enclosing))
+      
+      # Verification plot
+      verify_insideOutside_p = randomXY %>%
+        filter(isInside == F) %>%
+        ggplot(aes(x=x, y=y, col=factor(isInside)))+
+        ggrastr::geom_point_rast()
+      
+      randomXY %<>% filter(isInside == T)
+      
+      randomXY$color = NULL
+      
+      # Main place define the continuous distance
+      # Get the distance to the two outer layer splines (i.e. the minimal
+      # distance from the point to the spline). Then calculate the normalized
+      # distance ratio, giving the continuous layer value
+      allRandomXY_1_6b_dists = puckIHull[[puckIHull_nm]]$layerPoints %>%
+        map(function(thisLP){
+          rdist::cdist(randomXY[, c("x", "y")],
+                       thisLP[, c("x", "y")]) %>%
+            Rfast::rowMins(value=T) 
+        })
+      allRand_1_6b_pct = allRandomXY_1_6b_dists %>% {.$`1`/(.$`1`+.$`6b`)}
+      
+      randomXY$color = allRand_1_6b_pct
+
+    # Diagnostic plot
+    # puckIHull[[puckIHull_nm]]$layerPoints %>%
+    #   imap(~{.$nm=.y;.}) %>%
+    #   data.table::rbindlist() %>%
+    #   ggplot(aes(x=x, y=y, col=nm))+
+    #     geom_point()
+    
+    
+    # Show continuous color layer coloring
+    colorful_plot = ggplot(arrange(randomXY, color),
+           aes(x=x, y=y, color=(color)))+
+      scale_color_viridis_c() +
+      ggrastr::geom_point_rast(raster.dpi = 80)
+    
+    list(randomXY = randomXY,
+         verify_insideOutside_p=verify_insideOutside_p,
+         colorful_plot = colorful_plot)
+  })
+
+# Slow - optional diagnostic plots for all pucks
+# pdf("./011_PDFs/verifyInsideOut2.pdf")
+# nada = allPuck_points_L1L6_pct %>% map(~.$verify_insideOutside_p) %>% map(print)
+# dev.off()
+# pdf("./011_PDFs/colorful_plot2.pdf")
+# nada = allPuck_points_L1L6_pct %>% map(~.$colorful_plot) %>% map(print)
+# dev.off()
+```
+
+```{r}
+# Verify no duplicated rownames
+stopifnot(0 == (allPuck_points_L1L6_pct %>%
+                  map(~rownames(.$randomXY)) %>%
+                  unlist %>%
+                  duplicated %>%
+                  sum))
+
+allPuck_points_L1L6_pct %>%
+  map(~.$randomXY) %>%
+  map(colnames) %>% unique
+
+allPuck_points_L1L6_pct_df = allPuck_points_L1L6_pct %>%
+  map(~.$randomXY) %>%
+  map(tibble::rownames_to_column) %>%
+  data.table::rbindlist() %>%
+  tibble::column_to_rownames()
+
+allPuck_points_L1L6_pct_df %<>%
+  rename(L1_L6_depth = color)
+allPuck_points_L1L6_pct_df$isInside = NULL
+
+# REMNANT:05LEr3ni5c
+# Main output - 23_Cortex_L1L6pct.qs gives the continuous layer distance (L2 ->
+# L6(b)) for all isocortex points for the corresponding pucks
+fqsave(allPuck_points_L1L6_pct_df,
+       "~/03_RCTD_Subtypes/04 Puck Data/05_MBASS/23_Cortex_L1L6pct.qs")
+```
+
+# Main turning point: Continuous Layer Metric Generation -> Plotting
+
+```{r}
+allPuck_points_L1L6_pct_df = fqread("~/03_RCTD_Subtypes/04 Puck Data/05_MBASS/23_Cortex_L1L6pct.qs")
+# Usual confidence cutoff for confidant mapping
+MegaMapping_pastThresh = MegaMapping > 0.3
+
+# 35 GB RAM but way faster for plotting and experimentation. If memory constrained, can remove
+MegaMapping_pastThresh %<>% as.matrix
+```
+
+# Get Data for all Ex/Inh Isocortex
+```{r}
+CellTypeMeta = data.table::fread("./98_MouseAtlas_Submission/CellType_Metadata.tsv")
+
+Isocortex_CT_counts = rownames(MegaMeta)[MegaMeta$TopStruct == "Isocortex"] %>%
+  {MegaMapping_pastThresh[FastIndx(., rownames(MegaMapping_pastThresh)), ]} %>%
+  colSums
+
+Isocortex_CT_counts %<>% nonZero()
+
+Isocortex_CT_isNeuron = Isocortex_CT_counts %>%
+  names %>%
+  str_remove("=.*") %>%
+  {CellTypeMeta[.,,on=.(key)]$cell_class == "neuron"}
+
+Isocortex_CTs = names(Isocortex_CT_counts)[Isocortex_CT_isNeuron]
+
+Isocortex_CT_depths = Isocortex_CTs %>%
+  rlang::set_names() %>%
+  # head(50) %>%
+  map(function(thisCT){
+    thisCT_beads = names(which(MegaMapping_pastThresh[, thisCT]))
+    
+    thisCT_beads %<>% {.[. %fin% rownames(allPuck_points_L1L6_pct_df)]}
+    
+    thisCT_beads %<>%
+      {.[MegaMeta[FastIndx(thisCT_beads, rownames(MegaMeta)), "TopStruct"] == "Isocortex"]}
+    
+    thisCT_L1L6 = allPuck_points_L1L6_pct_df[FastIndx(thisCT_beads,
+                                                      rownames(allPuck_points_L1L6_pct_df))  ,]
+    
+    thisCT_L1L6
+  })
+
+# If want to save for later because is slow to run
+# fqsave(Isocortex_CT_depths, "~/tmp/Isocortex_CT_depths.qs")
+# Isocortex_CT_depths = fqread("~/tmp/Isocortex_CT_depths.qs")
+
+# Exam
+Isocortex_CT_depths %>% map_dbl(nrow) %>% clamp(500) %>% pdens
+
+
+# Example 'raw' plot before prettification
+Isocortex_CT_depths %>%
+  discard(~nrow(.) == 0) %>%
+  imap(~{.$CT=.y;.}) %>%
+  {.[  order(map_dbl(., ~median(.$L1_L6_depth)))  ]} %>%
+  head(100) %>%
+  data.table::rbindlist() %>%
+  ggplot(aes(x=L1_L6_depth, y=factor(CT)))+
+  ggridges::geom_density_ridges()+
+  theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank())
+
+```
+
+# Figure 1B
+```{r}
+# Pull integration from Nina's integration
+Ex_plot = fqread("~/03_RCTD_Subtypes/03 Zeng Data/10_MBASS/12_Nina_Integration/Ex_plot_data.qs")
+# Uneeded here as only plotted exc neurons
+# In_plot = fqread("~/03_RCTD_Subtypes/03 Zeng Data/10_MBASS/12_Nina_Integration/Inh_plot_data.qs")
+
+Ex_plot$plot_data$Inferred_justName = Ex_plot$plot_data$Inferred %>%
+  as.character %>%
+  str_remove("^[0-9]*_")
+
+
+Ex_main_layers = Ex_plot$plot_data %>%
+  group_by(cluster_name) %>%
+  group_map(function(gp, gpnm){
+    gp %>%
+      group_by(Inferred_justName) %>%
+      summarise(sumFrac = sum(fraction)) %>%
+      dplyr::filter(sumFrac > 0.1) %>%
+      arrange(desc(sumFrac)) %>% 
+      mutate(sumFrac = round(sumFrac*100)) %>%
+      list %>%
+      set_names(as.character(gpnm$cluster_name))
+  }) %>% purrr::flatten()
+  
+Ex_main_layers_string = Ex_main_layers %>%
+  map(~{paste0(paste0(.$Inferred_justName, "=", .$sumFrac, "%"), collapse = "|")})
+
+
+manualIntegration2Layer = list(
+  "L2"      = c("L2.IT.ENTl=98%",                                                 
+                "L2.IT.ENTm=83%"),                                                
+  "L2/3"    = c("L2.3.IT.CTX=87%",                                                
+                "L2.IT.RSPv.POST.PRE=43%|L2.3.IT.POST.PRE=28%|L2.IT.RSP.ACA=26%", 
+                "CA1.ProS=49%|L2.3.IT.CTX=14%",                                   
+                "L2.3.IT.ENTl=72%",                                               
+                "L2.3.IT.ProS=84%",                                               
+                "L2.3.IT.PAR=79%|L2.3.IT.ProS=16%",                               
+                "L2.3.IT.PAR=95%",                                                
+                "L2.3.IT.PAR=100%"),                                              
+# "L3"      = c( "L3.IT.ENTm=93%"),                                              
+  "L4"      = c("L4.IT.CTX=93%",                                                  
+                "L4.IT.CTX=98%",                                                  
+                "L4.RSP.ACA=98%"),                                                
+  "L4/5"    = c("L4.5.IT.CTX=67%|L4.IT.CTX=19%",                                  
+                "L4.5.IT.CTX=97%",                                                
+                "L4.5.IT.CTX=66%|L4.IT.CTX=28%",                                  
+                "L4.5.IT.CTX=66%|L4.IT.CTX=26%",                                  
+                "L4.5.IT.CTX=75%|L4.IT.CTX=25%"),                                 
+  "L5"      = c("L5.IT.CTX=76%|L4.5.IT.CTX=12%",                                  
+                "L5.IT.CTX=76%|L4.5.IT.CTX=12%",                                  
+                "L5.IT.RSP.ACA=70%|L4.5.IT.CTX=23%",                              
+                "L5.PT.CTX=99%",                                                  
+                "L5.PT.CTX=98%",                                                  
+                "L5.PT.CTX=100%"),                                                
+  "L5/6"    = c("L5.6.IT.CTX=82%",                                                
+                "L5.6.IT.TPE.ENT=87%",                                            
+                "L5.6.IT.TPE.ENT=58%|IT.HATA=37%",                                
+                "L5.6.IT.TPE.ENT=93%",                                            
+                "L5.6.IT.TPE.ENT=84%"),                                           
+  "L5/6 NP" = c("L5.6.NP.CTX=97%",                                                
+                "L5.6.NP.CTX=100%",                                               
+                "L5.6.NP.CTX=82%|L5.6.NP.CT.CTX=17%"),                            
+  "L6"      = c("L6.CT.CTX=94%",                                                  
+                "L6.CT.CTX=83%|L5.6.NP.CT.CTX=12%",                               
+                "L6.CT.CTX=99%",                                                  
+                "L6.IT.CTX=60%|L5.6.IT.CTX=39%",                                  
+                "L6.IT.ENTl=58%|L6.IT.CTX=40%",                                   
+                "L6.CT.CTX=100%",                                                 
+                "L6.CT.CTX=100%",                                                 
+                "L6.CT.CTX=100%",                                                 
+                "L4.5.IT.CTX=66%|L4.IT.CTX=28%",                                  
+                "L4.5.IT.CTX=66%|L4.IT.CTX=26%",                                  
+                "L4.5.IT.CTX=75%|L4.IT.CTX=25%",                                  
+                "L6.CT.CTX=84%|L6b.CTX=16%"),                                     
+  "L6b"     = c("L6b.CTX=100%",                                                   
+                "L6b.CTX=81%|L6.CT.CTX=19%",                                      
+                "L6b.CTX=100%",                                                   
+                "L6b.CTX=92%",                                                    
+                "L6b.ENT=80%|L6.CT.ENT=16%",                                      
+                "L6b.ENT=93%",                                                    
+                "L6b.RHP=76%|L6b.CTX=14%")
+)
+
+# 'invert' list to a dict lookup
+layer2manualIntegration = manualIntegration2Layer %>%
+  imap(~set_names(rep_along(., .y),
+                  .)) %>% set_names(NULL) %>% unlist
+
+Isocortex_CT_depths__integrated = Isocortex_CT_depths
+names(Isocortex_CT_depths__integrated) %<>% str_remove(".*=")
+
+# Needs to be both mapped and integrated
+Isocortex_CT_depths__integrated %<>%
+  {.[  intersect(names(.), names(Ex_main_layers_string))   ]}
+l(Isocortex_CT_depths__integrated)
+
+
+Iscortex_depths_withLayer =
+  Isocortex_CT_depths__integrated %>% 
+  discard(~nrow(.)==0) %>%
+  discard(~nrow(.) <= 50) %>%
+  imap(~{.$size=nrow(.);.}) %>%
+  imap(~{.$avg_depth=median(.$L1_L6_depth);.}) %>%
+  imap(~{.$nm=.y;
+        .$Integrated_layer = layer2manualIntegration[Ex_main_layers_string[[.y]]];
+        .}) %>%
+  data.table::rbindlist() %>%
+  filter(!is.na(Integrated_layer))
+
+
+
+{
+  
+  guide_axis_label_trans <- function(label_trans = identity, ...) {
+    axis_guide <- guide_axis(..., title = "Cluster")
+    axis_guide$label_trans <- rlang::as_function(label_trans)
+    class(axis_guide) <- c("guide_axis_trans", class(axis_guide))
+    axis_guide
+  }
+  
+  guide_train.guide_axis_trans <- function(x, ...) {
+    trained <- NextMethod()
+    trained$key$.label <- x$label_trans(trained$key$.label)
+    trained
+  }
+  
+  
+  tmpForP = Iscortex_depths_withLayer %>%
+    # Arrange by biological layer
+    mutate(Integrated_layer = factor(Integrated_layer,
+                                     levels=c("L2", "L2/3", "L3", "L4", "L4/5", "L5",
+                                              "L5/6", "L5/6 NP", "L6", "L6b"))) %>% 
+    arrange(Integrated_layer) %>%
+    {.$nm=forcats::fct_reorder2(.$nm, .$avg_depth, (as.numeric(.$Integrated_layer)), .fun = function(dpth, lyr){
+      stopifnot(1==l(unique(dpth)))
+      stopifnot(1==l(unique(lyr)))
+      unique(lyr)+unique(dpth)/10
+  });.}
+  
+  MoP_CT_color = as.character(khroma::colour("smooth rainbow")(nlevels(tmpForP$nm), range = c(0.3, 0.7))) %>%
+    shades::saturation(shades::delta(0.1)) %>%
+    shades::brightness(shades::delta(0.2)) %>%
+    as.character() 
+  
+  tmpForP$Integrated_layer %>% as.character() %>% unique %>% map_dbl(nchar) %>% max
+  
+  tmpForP %<>% arrange(as.numeric(Integrated_layer))
+  
+  
+  p = tmpForP %>%
+    ggplot(aes(y=nm,
+               x=L1_L6_depth,
+               fill=MoP_CT_color[as.numeric(nm)]
+               # fill=Integrated_layer
+               # fill=(clamp(size, 250))
+    ))+
+    scale_fill_identity()+
+    ggridges::geom_density_ridges(scale=2)+
+    cowplot::theme_cowplot()+
+    labs(
+      # fill="BICCN Integrated\nLayer Number",
+      fill="",
+      x=("Percent Radial Depth \n(L2 \u2192 L6b)"),
+      y=element_blank(),
+    )+
+    coord_cartesian(clip = "on", xlim=c(-.03,NA), expand=F)+
+    scale_x_continuous(labels = scales::percent, breaks=seq(0, 1, 0.25))+
+    scale_y_discrete(position = "right")+
+    theme(legend.position = "bottom")+
+    theme(axis.text.y = element_text(size=14*1.6))
+  
+  p
+  
+  # Final output
+  # ggsave("./98_MouseAtlas_Submission/Figures/Fig_1/MoP_Ridge.pdf",
+  #        p+labs(x=NULL),
+  #        width  =3.7 *2,
+  #        height =5.28*2,
+  #        units="in",
+  #        dpi = 1200
+  # )
+  
+  }
+```
+
+
+# Figure 5C.
+```{r}
+# Nina's cell types of interest
+# Basically sameas 1B's code
+Nina_CTs = c("300-0-0-1-0-0-0-0-1-0-0-0-1-0=Ex_Slc30a3_Sulf1_Aprk1", "300-0-0-1-0-0-0-0-1-0-0-0-1-1=Ex_Rorb_Dnah14", 
+"300-0-0-1-0-0-0-0-4=Ex_Oprk1_Col11a1", "300-0-0-1-0-0-0-1-3=Ex_Fezf2_Lipm", 
+"300-0-0-1-0-1-0-0-1-0-0-0=Ex_Nxph4_Moxd1_Igfbp4", "300-0-0-1-0-1-0-0-1-0-0-1-1=Ex_Nxph4_Kcnj5", 
+"300-0-0-1-0-1-0-0-1-0-0-2=Ex_Nxph4_Moxd1_Htr2c", "300-0-0-1-0-1-0-0-1-0-1-1=Ex_Nxph4_Lman1l"
+)
+
+Nina_CT_depths = Nina_CTs %>%
+  rlang::set_names() %>%
+  map(function(thisCT){
+    thisCT_beads = names(which(MegaMapping_pastThresh[, thisCT]))
+    
+    thisCT_beads %<>% {.[. %fin% rownames(allPuck_points_L1L6_pct_df)]}
+    
+    thisCT_beads %<>%
+      {.[MegaMeta[FastIndx(thisCT_beads, rownames(MegaMeta)), "TopStruct"] == "Isocortex"]}
+    
+    thisCT_L1L6 = allPuck_points_L1L6_pct_df[FastIndx(thisCT_beads,
+                                                      rownames(allPuck_points_L1L6_pct_df))  ,]
+    
+    thisCT_L1L6
+  }) %>%
+  imap(~{.$nm=.y; .}) %>%
+  data.table::rbindlist()
+
+Nina_CT_depths %<>%
+  group_by(nm) %>%
+  mutate(avg_depth=median(L1_L6_depth)) %>%
+  ungroup %>%
+  mutate(nm=str_remove(nm, ".*="))
+
+{
+  
+  guide_axis_label_trans <- function(label_trans = identity, ...) {
+    axis_guide <- guide_axis(..., title = "Cluster")
+    axis_guide$label_trans <- rlang::as_function(label_trans)
+    class(axis_guide) <- c("guide_axis_trans", class(axis_guide))
+    axis_guide
+  }
+  
+  guide_train.guide_axis_trans <- function(x, ...) {
+    trained <- NextMethod()
+    trained$key$.label <- x$label_trans(trained$key$.label)
+    trained
+  }
+  
+  
+  tmpForP = Nina_CT_depths %>%
+    {.$nm=forcats::fct_reorder(.$nm, .$avg_depth, .desc = T);.}
+  
+  MoP_CT_color = as.character(paletteer::paletteer_dynamic("cartography::turquoise.pal", nlevels(tmpForP$nm)))
+  
+  tmpForP %<>% arrange(as.numeric(nm))
+  
+  
+  
+  p = tmpForP %>%
+    ggplot(aes(y=nm,
+               x=L1_L6_depth,
+               fill=MoP_CT_color[as.numeric(nm)]
+    ))+
+    ggridges::geom_density_ridges(scale=2)+
+    cowplot::theme_cowplot()+
+    labs(
+      fill="",
+      x=("Radial Depth (L2 \u2192 L6b)"),
+      y=element_blank(),
+    )+
+    scale_fill_identity()+
+    coord_cartesian(clip = "on", xlim=c(-.03,NA), expand=F)+
+    scale_x_continuous(labels = scales::percent, breaks=seq(0, 1, 0.25))+
+    theme(legend.position = "bottom")+
+    theme(axis.text.y = element_text(size=12 * 5/2.38),
+          axis.text.x = element_text(size=12 * 5/2.38),
+          axis.title.x = element_text(size=12 * 7/2.38))
+  
+  p
+  
+  # ggsave("./98_MouseAtlas_Submission/Figures/Fig_5/Fig5_CT_Ridge.pdf",
+  #        p, 
+  #        width   = 4.7 * 2,
+  #        height  = 8.96 * 2,
+  #        device = cairo_pdf)
+  
+}
+``
